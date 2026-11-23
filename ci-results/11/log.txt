@@ -1,0 +1,70 @@
+﻿2026-11-23 11:58:53.616 显卡：未识别，不用切换独显
+2026-11-23 11:58:54.474 启动 --render-subtitle D:\a\ai-boot-animations\ai-boot-animations\claude\docs\preview.jpg D:\a\ai-boot-animations\ai-boot-animations\out\sub1.png 1  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-23 11:58:55.408 字幕渲染到 D:\a\ai-boot-animations\ai-boot-animations\out\sub1.png  字体=./#Libre Bodoni
+2026-11-23 11:58:56.096 显卡：未识别，不用切换独显
+2026-11-23 11:58:56.152 启动 --render-subtitle D:\a\ai-boot-animations\ai-boot-animations\claude\docs\preview.jpg D:\a\ai-boot-animations\ai-boot-animations\out\sub2.png 2  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-23 11:58:56.295 字幕渲染到 D:\a\ai-boot-animations\ai-boot-animations\out\sub2.png  字体=./#Libre Bodoni
+2026-11-23 11:59:00.462 显卡：未识别，不用切换独显
+2026-11-23 11:59:00.487 启动 --target-title Notepad --play intro --exit-after 27 --shot-at 1,5,9,11.5,14,21,23.5,26 --shot-dir D:\a\ai-boot-animations\ai-boot-animations\out\intro  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-23 11:59:01.804 浮层样式 0x8080080
+2026-11-23 11:59:01.805 开始播放开屏动画，窗口 393404 (0,0 1024x720)
+2026-11-23 11:59:02.872 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_01.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-23 11:59:06.897 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_05.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-23 11:59:09.274 字幕 1 出现，视频时间 4.103
+2026-11-23 11:59:10.976 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_09.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-23 11:59:12.374 字幕 1 消失，视频时间 7.203
+2026-11-23 11:59:13.480 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_11.5.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-23 11:59:13.480 字幕 2 出现，视频时间 8.310
+2026-11-23 11:59:15.993 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_14.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-23 11:59:15.995 进入循环帧，透出界面
+2026-11-23 11:59:16.484 字幕 2 消失，视频时间 11.313
+2026-11-23 11:59:22.968 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_21.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 11:59:25.361 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_23.5.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 11:59:27.515 开屏放完，接循环段
+2026-11-23 11:59:27.979 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_26.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 11:59:28.879 播放结束
+2026-11-23 11:59:28.880 测试结束
+2026-11-23 11:59:32.615 显卡：未识别，不用切换独显
+2026-11-23 11:59:32.640 启动 --target-title Notepad --play intro --test-skip 3 --exit-after 8 --shot-at 2.5,3.4,4.5,7 --shot-dir D:\a\ai-boot-animations\ai-boot-animations\out\skip  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-23 11:59:32.856 浮层样式 0x8080080
+2026-11-23 11:59:32.857 开始播放开屏动画，窗口 393594 (0,0 1024x720)
+2026-11-23 11:59:35.430 截图 D:\a\ai-boot-animations\ai-boot-animations\out\skip\shot_02.5.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-23 11:59:35.882 点了跳过开屏
+2026-11-23 11:59:35.906 进入循环帧，透出界面
+2026-11-23 11:59:36.343 截图 D:\a\ai-boot-animations\ai-boot-animations\out\skip\shot_03.4.png  播放阶段=Revealed 透明度=0.73 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 11:59:37.498 截图 D:\a\ai-boot-animations\ai-boot-animations\out\skip\shot_04.5.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 11:59:39.973 截图 D:\a\ai-boot-animations\ai-boot-animations\out\skip\shot_07.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 11:59:40.967 播放结束
+2026-11-23 11:59:40.968 测试结束
+2026-11-23 11:59:44.640 显卡：未识别，不用切换独显
+2026-11-23 11:59:44.666 启动 --target-title Notepad --play loop --exit-after 14 --shot-at 2,6,12 --shot-dir D:\a\ai-boot-animations\ai-boot-animations\out\loop  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-23 11:59:44.864 浮层样式 0x80800A0
+2026-11-23 11:59:44.864 直接开启循环背景，窗口 459130
+2026-11-23 11:59:47.025 截图 D:\a\ai-boot-animations\ai-boot-animations\out\loop\shot_02.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 11:59:51.072 截图 D:\a\ai-boot-animations\ai-boot-animations\out\loop\shot_06.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 11:59:56.950 截图 D:\a\ai-boot-animations\ai-boot-animations\out\loop\shot_12.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 11:59:58.927 播放结束
+2026-11-23 11:59:58.929 测试结束
+2026-11-23 12:00:02.605 显卡：未识别，不用切换独显
+2026-11-23 12:00:02.631 启动 --target-title Notepad --play loop --exit-after 32 --loop-cut 0.8 --stall-test 10 --recycle-every 5 --heartbeat 4 --shot-at 9,16,30 --shot-dir D:\a\ai-boot-animations\ai-boot-animations\out\selfheal  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-23 12:00:02.832 浮层样式 0x80800A0
+2026-11-23 12:00:02.832 直接开启循环背景，窗口 459132
+2026-11-23 12:00:07.007 循环背景运行中：已循环 4 圈，自动恢复 0 次，进度 0.51 秒，内存 356MB，句柄 1030
+2026-11-23 12:00:11.179 循环背景运行中：已循环 9 圈，自动恢复 0 次，进度 0.32 秒，内存 365MB，句柄 1032
+2026-11-23 12:00:12.035 截图 D:\a\ai-boot-animations\ai-boot-animations\out\selfheal\shot_09.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 12:00:12.807 测试：故意把正在放的循环播放器暂停，等自愈接回来
+2026-11-23 12:00:15.407 循环背景运行中：已循环 11 圈，自动恢复 0 次，进度 0.19 秒，内存 367MB，句柄 1038
+2026-11-23 12:00:15.912 循环背景自动恢复（画面 3.1 秒没动）：第 1 次，已循环 11 圈，当时进度 0.19 秒
+2026-11-23 12:00:16.439 恢复成功：循环背景又动起来了
+2026-11-23 12:00:18.961 截图 D:\a\ai-boot-animations\ai-boot-animations\out\selfheal\shot_16.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 12:00:19.582 循环背景运行中：已循环 14 圈，自动恢复 1 次，进度 0.00 秒，内存 386MB，句柄 1060
+2026-11-23 12:00:22.810 测试：故意把正在放的循环播放器暂停，等自愈接回来
+2026-11-23 12:00:23.692 循环背景运行中：已循环 18 圈，自动恢复 1 次，进度 0.59 秒，内存 387MB，句柄 1062
+2026-11-23 12:00:26.020 循环背景自动恢复（画面 3.1 秒没动）：第 2 次，已循环 18 圈，当时进度 0.59 秒
+2026-11-23 12:00:26.531 恢复成功：循环背景又动起来了
+2026-11-23 12:00:27.833 循环背景运行中：已循环 19 圈，自动恢复 2 次，进度 0.00 秒，内存 417MB，句柄 1070
+2026-11-23 12:00:31.972 循环背景运行中：已循环 24 圈，自动恢复 2 次，进度 0.56 秒，内存 388MB，句柄 1074
+2026-11-23 12:00:32.821 测试：故意把正在放的循环播放器暂停，等自愈接回来
+2026-11-23 12:00:32.913 截图 D:\a\ai-boot-animations\ai-boot-animations\out\selfheal\shot_30.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-23 12:00:34.906 播放结束
+2026-11-23 12:00:34.908 测试结束
