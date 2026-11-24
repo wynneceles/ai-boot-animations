@@ -1,0 +1,81 @@
+﻿2026-11-24 13:09:07.270 显卡：未识别，不用切换独显
+2026-11-24 13:09:07.294 启动 --target-title Notepad --play intro --exit-after 32 --shot-at 1,5,9,12,14,16,22,26.5,30 --shot-dir D:\a\ai-boot-animations\ai-boot-animations\out\intro  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-24 13:09:07.508 循环段：重叠交接（loop-x2.mp4）
+2026-11-24 13:09:08.041 浮层样式 0x8080080
+2026-11-24 13:09:08.042 开始播放开屏动画，窗口 524672 (0,0 1024x720)
+2026-11-24 13:09:09.078 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_01.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 13:09:13.164 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_05.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 13:09:17.240 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_09.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 13:09:20.143 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_12.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 13:09:22.130 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_14.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 13:09:24.198 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_16.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 13:09:24.830 进入循环帧，透出界面
+2026-11-24 13:09:30.139 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_22.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:09:34.722 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_26.5.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:09:37.172 开屏放完，接循环段
+2026-11-24 13:09:38.117 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_30.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:09:40.127 播放结束
+2026-11-24 13:09:40.127 测试结束
+2026-11-24 13:09:43.887 显卡：未识别，不用切换独显
+2026-11-24 13:09:43.913 启动 --target-title Notepad --play intro --test-skip 3 --exit-after 8 --shot-at 2.5,3.4,4.5,7 --shot-dir D:\a\ai-boot-animations\ai-boot-animations\out\skip  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-24 13:09:44.076 循环段：重叠交接（loop-x2.mp4）
+2026-11-24 13:09:44.133 浮层样式 0x8080080
+2026-11-24 13:09:44.134 开始播放开屏动画，窗口 590208 (0,0 1024x720)
+2026-11-24 13:09:46.762 截图 D:\a\ai-boot-animations\ai-boot-animations\out\skip\shot_02.5.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 13:09:47.203 点了跳过开屏
+2026-11-24 13:09:47.220 进入循环帧，透出界面
+2026-11-24 13:09:47.636 截图 D:\a\ai-boot-animations\ai-boot-animations\out\skip\shot_03.4.png  播放阶段=Revealed 透明度=0.77 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:09:48.680 截图 D:\a\ai-boot-animations\ai-boot-animations\out\skip\shot_04.5.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:09:51.256 截图 D:\a\ai-boot-animations\ai-boot-animations\out\skip\shot_07.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:09:52.159 播放结束
+2026-11-24 13:09:52.159 测试结束
+2026-11-24 13:09:55.837 显卡：未识别，不用切换独显
+2026-11-24 13:09:55.864 启动 --target-title Notepad --play loop --exit-after 14 --shot-at 2,6,12 --shot-dir D:\a\ai-boot-animations\ai-boot-animations\out\loop  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-24 13:09:56.011 循环段：重叠交接（loop-x2.mp4）
+2026-11-24 13:09:56.057 浮层样式 0x80800A0
+2026-11-24 13:09:56.057 直接开启循环背景，窗口 524658
+2026-11-24 13:09:58.217 截图 D:\a\ai-boot-animations\ai-boot-animations\out\loop\shot_02.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:10:02.187 截图 D:\a\ai-boot-animations\ai-boot-animations\out\loop\shot_06.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:10:05.053 循环交接（第 1 次）：错位 72ms，下次提前 72ms
+2026-11-24 13:10:08.162 截图 D:\a\ai-boot-animations\ai-boot-animations\out\loop\shot_12.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:10:10.161 播放结束
+2026-11-24 13:10:10.161 测试结束
+2026-11-24 13:10:13.831 显卡：未识别，不用切换独显
+2026-11-24 13:10:13.857 启动 --target-title Notepad --play loop --exit-after 32 --legacy-loop --loop-cut 0.8 --stall-test 10 --recycle-every 5 --heartbeat 4 --shot-at 9,16,30 --shot-dir D:\a\ai-boot-animations\ai-boot-animations\out\selfheal  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-24 13:10:14.016 循环段：放完再接（loop.mp4）
+2026-11-24 13:10:14.057 浮层样式 0x80800A0
+2026-11-24 13:10:14.057 直接开启循环背景，窗口 590194
+2026-11-24 13:10:18.192 循环背景运行中：已循环 4 圈，自动恢复 0 次，进度 0.54 秒，内存 354MB，句柄 1028
+2026-11-24 13:10:22.378 循环背景运行中：已循环 9 圈，自动恢复 0 次，进度 0.32 秒，内存 378MB，句柄 1027
+2026-11-24 13:10:23.221 截图 D:\a\ai-boot-animations\ai-boot-animations\out\selfheal\shot_09.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:10:24.024 测试：故意把正在放的循环播放器暂停，等自愈接回来
+2026-11-24 13:10:26.568 循环背景运行中：已循环 11 圈，自动恢复 0 次，进度 0.24 秒，内存 376MB，句柄 1031
+2026-11-24 13:10:27.350 循环背景自动恢复（画面 3.1 秒没动）：第 1 次，已循环 11 圈，当时进度 0.24 秒
+2026-11-24 13:10:27.907 恢复成功：循环背景又动起来了
+2026-11-24 13:10:30.262 截图 D:\a\ai-boot-animations\ai-boot-animations\out\selfheal\shot_16.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:10:30.786 循环背景运行中：已循环 14 圈，自动恢复 1 次，进度 0.61 秒，内存 507MB，句柄 1104
+2026-11-24 13:10:34.064 测试：故意把正在放的循环播放器暂停，等自愈接回来
+2026-11-24 13:10:34.924 循环背景运行中：已循环 18 圈，自动恢复 1 次，进度 0.36 秒，内存 515MB，句柄 1103
+2026-11-24 13:10:37.221 循环背景自动恢复（画面 3.1 秒没动）：第 2 次，已循环 18 圈，当时进度 0.36 秒
+2026-11-24 13:10:37.739 恢复成功：循环背景又动起来了
+2026-11-24 13:10:39.034 循环背景运行中：已循环 19 圈，自动恢复 2 次，进度 0.72 秒，内存 549MB，句柄 1119
+2026-11-24 13:10:43.198 循环背景运行中：已循环 24 圈，自动恢复 2 次，进度 0.65 秒，内存 513MB，句柄 1122
+2026-11-24 13:10:44.052 测试：故意把正在放的循环播放器暂停，等自愈接回来
+2026-11-24 13:10:44.156 截图 D:\a\ai-boot-animations\ai-boot-animations\out\selfheal\shot_30.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 13:10:46.143 播放结束
+2026-11-24 13:10:46.144 测试结束
+2026-11-24 13:10:49.869 显卡：未识别，不用切换独显
+2026-11-24 13:10:49.893 启动 --target-title Notepad --play loop --exit-after 34 --legacy-loop  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-24 13:10:50.042 循环段：放完再接（loop.mp4）
+2026-11-24 13:10:50.087 浮层样式 0x80800A0
+2026-11-24 13:10:50.087 直接开启循环背景，窗口 655424
+2026-11-24 13:11:24.198 播放结束
+2026-11-24 13:11:24.198 测试结束
+2026-11-24 13:11:28.448 显卡：未识别，不用切换独显
+2026-11-24 13:11:28.473 启动 --target-title Notepad --play loop --exit-after 34 --recycle-every 2  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-24 13:11:28.623 循环段：重叠交接（loop-x2.mp4）
+2026-11-24 13:11:28.667 浮层样式 0x80800A0
+2026-11-24 13:11:28.668 直接开启循环背景，窗口 852352
+2026-11-24 13:11:37.683 循环交接（第 1 次）：错位 90ms，下次提前 90ms
+2026-11-24 13:11:45.683 循环交接（第 2 次）：错位 6ms，下次提前 96ms
+2026-11-24 13:11:53.717 循环交接（第 3 次）：错位 22ms，下次提前 118ms
