@@ -1,0 +1,17 @@
+﻿2026-11-24 12:51:41.500 显卡：未识别，不用切换独显
+2026-11-24 12:51:41.535 启动 --target-title Notepad --play intro --exit-after 32 --shot-at 1,5,9,12,14,16,22,26.5,30 --shot-dir D:\a\ai-boot-animations\ai-boot-animations\out\intro  程序目录 D:\a\ai-boot-animations\ai-boot-animations\build\
+2026-11-24 12:51:41.787 循环段：重叠交接（loop-x2.mp4）
+2026-11-24 12:51:43.166 浮层样式 0x8080080
+2026-11-24 12:51:43.166 开始播放开屏动画，窗口 262286 (0,0 1024x720)
+2026-11-24 12:51:44.234 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_01.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 12:51:48.307 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_05.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 12:51:52.292 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_09.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 12:51:55.348 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_12.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 12:51:57.341 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_14.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 12:51:59.337 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_16.0.png  播放阶段=Intro 透明度=1.00 样式=0x8080080 中心点击落到=浮层
+2026-11-24 12:51:59.797 进入循环帧，透出界面
+2026-11-24 12:52:05.353 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_22.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 12:52:09.769 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_26.5.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 12:52:13.334 截图 D:\a\ai-boot-animations\ai-boot-animations\out\intro\shot_30.0.png  播放阶段=Revealed 透明度=0.25 样式=0x80800A0 中心点击落到=目标窗口
+2026-11-24 12:52:15.262 播放结束
+2026-11-24 12:52:15.263 测试结束
