@@ -131,8 +131,9 @@ Antigravity 开着的时候，菜单栏右边会出现一个四芒星 ✦，点�
 
 - 小程序登录后在后台常驻（`~/Library/LaunchAgents`），监听 Antigravity 启动（应用标识 `com.google.antigravity`）
 - 用 `CGWindowListCopyWindowInfo` 只读取 Antigravity 主窗口的位置和大小（不读标题和内容，所以不需要授权），在它正上方盖一个无边框窗口播放动画，并跟着窗口移动、缩放；Antigravity 窗口被别的 App 压着时，动画也退到那个窗口下面，不会盖到别的 App
-- 开屏和循环在内存里拼成一条约 8 小时的时间线一次播放，接缝不卡；放到头自动跳回循环开头
-- 只在 Antigravity 启动、真要播放时才在后台拼这条时间线，播完、跳过或 Antigravity 关掉就释放；平时后台只占几十 MB
+- 播放时把开屏和 120 段循环拼成一条时间线，放到末尾后自动跳回循环开头。停止播放或退出 Antigravity 时释放时间线。
+- 应用或桌面切换时立即检查窗口。静止可见时每秒检查约 10 次，拖动时按屏幕刷新率提高到 60–120 次，完全遮挡时约 2 次，最小化时约 1 次。
+- 最小化、完全遮挡或背景透明度为 0 时暂停静音循环，重新可见时继续。系统休眠时暂停播放和窗口检查。
 - 进入循环后窗口变半透明并开启点击穿透，Antigravity 照常使用
 
 日志：`~/Library/Logs/AntigravityBootAnimation.log`
