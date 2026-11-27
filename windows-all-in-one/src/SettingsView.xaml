@@ -1,0 +1,457 @@
+<!--
+  「启动设置」窗口的界面。作为资源嵌在 AIBootAnimations.exe 里，由 SettingsWindow 用 XamlReader 载入；
+  x:Name 起了名字的控件在代码里接线，三个应用那几行（AppsPanel）由代码按 Profile 生成。
+  改这里的颜色、间距、文字后重新运行 build.ps1 即可。
+-->
+<Border xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Background="#F6F7F9" BorderBrush="#DADDE3" BorderThickness="1"
+        TextElement.FontFamily="Microsoft YaHei UI" TextElement.FontSize="13" TextElement.Foreground="#1F2329"
+        TextOptions.TextFormattingMode="Display" UseLayoutRounding="True" SnapsToDevicePixels="True">
+  <Border.Resources>
+
+    <!-- 卡片、行标签 -->
+    <Style x:Key="Card" TargetType="Border">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#E6E8EC"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="Padding" Value="16,14"/>
+      <Setter Property="Margin" Value="0,0,0,14"/>
+    </Style>
+    <Style x:Key="Label" TargetType="TextBlock">
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Foreground" Value="#374151"/>
+    </Style>
+
+    <!-- 勾选框：圆角方块 + 白色对勾 -->
+    <Style TargetType="CheckBox">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#1F2329"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="CheckBox">
+            <Grid Background="Transparent">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <Border x:Name="Box" Width="18" Height="18" CornerRadius="5" BorderThickness="1.5"
+                      BorderBrush="#C3C8D0" Background="White" VerticalAlignment="Center">
+                <Path x:Name="Mark" Data="M 3.5 8.5 L 7 12 L 13.5 5" Stroke="White" StrokeThickness="2"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Visibility="Collapsed"/>
+              </Border>
+              <ContentPresenter Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Box" Property="BorderBrush" Value="#6366F1"/>
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Box" Property="Background" Value="#6366F1"/>
+                <Setter TargetName="Box" Property="BorderBrush" Value="#6366F1"/>
+                <Setter TargetName="Mark" Property="Visibility" Value="Visible"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- 单选：圆圈 -->
+    <Style x:Key="Radio" TargetType="RadioButton">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#1F2329"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Grid Background="Transparent">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <Grid Width="18" Height="18" VerticalAlignment="Center">
+                <Ellipse x:Name="Ring" Stroke="#C3C8D0" StrokeThickness="1.5" Fill="White"/>
+                <Ellipse x:Name="Dot" Width="8" Height="8" Fill="#6366F1" Visibility="Collapsed"/>
+              </Grid>
+              <ContentPresenter Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Ring" Property="Stroke" Value="#6366F1"/>
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Ring" Property="Stroke" Value="#6366F1"/>
+                <Setter TargetName="Dot" Property="Visibility" Value="Visible"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- 三选一（浅色 / 深色 / 原样）：按钮本身透明，下面那块白色滑块由代码滑过去 -->
+    <Style x:Key="Segment" TargetType="RadioButton">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#4B5563"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border Background="Transparent">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="#6366F1"/>
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter Property="Foreground" Value="#4F46E5"/>
+                <Setter Property="FontWeight" Value="Bold"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- 拉杆：细轨道 + 紫色已选段 + 圆形滑块 -->
+    <Style x:Key="SliderFill" TargetType="RepeatButton">
+      <Setter Property="Focusable" Value="False"/>
+      <Setter Property="IsTabStop" Value="False"/>
+      <Setter Property="OverridesDefaultStyle" Value="True"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RepeatButton">
+            <Border Background="Transparent">
+              <Border Height="4" CornerRadius="2" Background="#6366F1" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="SliderRest" TargetType="RepeatButton">
+      <Setter Property="Focusable" Value="False"/>
+      <Setter Property="IsTabStop" Value="False"/>
+      <Setter Property="OverridesDefaultStyle" Value="True"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RepeatButton">
+            <Border Background="Transparent">
+              <Border Height="4" CornerRadius="2" Background="#E3E6EB" VerticalAlignment="Center"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="SliderThumb" TargetType="Thumb">
+      <Setter Property="OverridesDefaultStyle" Value="True"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Thumb">
+            <Grid Width="18" Height="18" Background="Transparent">
+              <Ellipse Fill="White" Stroke="#6366F1" StrokeThickness="2">
+                <Ellipse.Effect>
+                  <DropShadowEffect BlurRadius="4" ShadowDepth="1" Direction="270" Opacity="0.2" Color="#000000"/>
+                </Ellipse.Effect>
+              </Ellipse>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="Slider">
+      <Setter Property="Focusable" Value="False"/>
+      <Setter Property="IsMoveToPointEnabled" Value="True"/>
+      <Setter Property="IsSnapToTickEnabled" Value="True"/>
+      <Setter Property="TickFrequency" Value="1"/>
+      <Setter Property="SmallChange" Value="1"/>
+      <Setter Property="LargeChange" Value="5"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Slider">
+            <Grid Height="24" Background="Transparent">
+              <Track x:Name="PART_Track">
+                <Track.DecreaseRepeatButton>
+                  <RepeatButton Style="{StaticResource SliderFill}" Command="{x:Static Slider.DecreaseLarge}"/>
+                </Track.DecreaseRepeatButton>
+                <Track.IncreaseRepeatButton>
+                  <RepeatButton Style="{StaticResource SliderRest}" Command="{x:Static Slider.IncreaseLarge}"/>
+                </Track.IncreaseRepeatButton>
+                <Track.Thumb>
+                  <Thumb Style="{StaticResource SliderThumb}"/>
+                </Track.Thumb>
+              </Track>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- 数字输入框 -->
+    <Style x:Key="Num" TargetType="TextBox">
+      <Setter Property="Width" Value="46"/>
+      <Setter Property="Height" Value="28"/>
+      <Setter Property="TextAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Foreground" Value="#1F2329"/>
+      <Setter Property="CaretBrush" Value="#4F46E5"/>
+      <Setter Property="MaxLength" Value="3"/>
+      <Setter Property="InputMethod.IsInputMethodEnabled" Value="False"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border x:Name="Bd" CornerRadius="7" BorderThickness="1" BorderBrush="#D5D9E0" Background="White">
+              <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" Margin="2,0"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#A5B4FC"/>
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#6366F1"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- 按钮 -->
+    <Style TargetType="Button">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#1F2329"/>
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#D5D9E0"/>
+      <Setter Property="Padding" Value="14,6"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" CornerRadius="8" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#F3F4F6"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#E8EAEE"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- 「设定」小菜单里的一项 -->
+    <Style x:Key="MenuItem" TargetType="Button">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#1F2329"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" CornerRadius="6" Background="Transparent" Padding="12,8">
+              <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#F1F2FF"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#E4E7FF"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="MenuItemDanger" TargetType="Button" BasedOn="{StaticResource MenuItem}">
+      <Setter Property="Foreground" Value="#C2410C"/>
+    </Style>
+    <Style x:Key="Preview" TargetType="Button">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#4F46E5"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" CornerRadius="14" Background="#EEF0FF" Padding="12,5">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#E0E4FF"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#D3D8FF"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="TitleClose" TargetType="Button">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Width="38" Height="32" CornerRadius="8" Background="Transparent">
+              <Path x:Name="X" Data="M 0 0 L 10 10 M 10 0 L 0 10" Stroke="#6B7280" StrokeThickness="1.4"
+                    StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#E81123"/>
+                <Setter TargetName="X" Property="Stroke" Value="White"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Border.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="58"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <!-- 标题栏（整条可以拖动） -->
+    <Grid Grid.Row="0" Margin="20,0,12,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <Image x:Name="HeaderIcon" Width="30" Height="30" VerticalAlignment="Center"/>
+      <TextBlock Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Text="启动设置" FontSize="17" FontWeight="Bold"/>
+      <Button x:Name="CloseButton" Grid.Column="2" Style="{StaticResource TitleClose}" VerticalAlignment="Center"
+              ToolTip="关闭" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+    </Grid>
+
+    <!-- 两栏：左边应用、开关和关闭方式；右边背景和声音（卡片和左栏一样高）；右下角「设定」 -->
+    <Grid Grid.Row="1" Margin="20,2,20,20">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="330"/>
+        <ColumnDefinition Width="16"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+
+    <StackPanel Grid.Column="0">
+      <Border Style="{StaticResource Card}" Padding="6,4">
+        <StackPanel x:Name="AppsPanel"/>
+      </Border>
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <CheckBox x:Name="IntroBox" Content="播放开屏动画"/>
+          <CheckBox x:Name="LoopBox" Margin="0,12,0,0" Content="保留循环背景"/>
+        </StackPanel>
+      </Border>
+      <Border Style="{StaticResource Card}" Margin="0">
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Style="{StaticResource Label}" Text="关闭窗口时"/>
+          <RadioButton x:Name="CloseTray" Style="{StaticResource Radio}" GroupName="close" Margin="20,0,0,0" Content="缩小到托盘"/>
+          <RadioButton x:Name="CloseExit" Style="{StaticResource Radio}" GroupName="close" Margin="24,0,0,0" Content="完全退出"/>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="86"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Style="{StaticResource Label}" Text="背景不透明度"/>
+        <Slider x:Name="AlphaSlider" Grid.Row="0" Grid.Column="1" Margin="4,0,12,0"/>
+        <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBox x:Name="AlphaBox" Style="{StaticResource Num}"/>
+          <TextBlock Text="%" Margin="6,0,0,0" VerticalAlignment="Center" Foreground="#6B7280"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="1" Style="{StaticResource Label}" Text="背景适配"/>
+        <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="4,0,0,0" Height="34" VerticalAlignment="Center">
+          <Border Background="#F0F1F4" CornerRadius="9"/>
+          <Grid Margin="3">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border x:Name="ModeThumb" Grid.Column="0" CornerRadius="7" Background="White">
+              <Border.Effect>
+                <DropShadowEffect BlurRadius="6" ShadowDepth="1" Direction="270" Opacity="0.14" Color="#000000"/>
+              </Border.Effect>
+            </Border>
+            <RadioButton x:Name="ModeLight" Grid.Column="0" Style="{StaticResource Segment}" GroupName="mode" Content="浅色"/>
+            <RadioButton x:Name="ModeOff" Grid.Column="1" Style="{StaticResource Segment}" GroupName="mode" Content="原样"/>
+          </Grid>
+        </Grid>
+
+        <TextBlock Grid.Row="2" Style="{StaticResource Label}" Text="开屏音量"/>
+        <Slider x:Name="VolSlider" Grid.Row="2" Grid.Column="1" Margin="4,0,12,0"/>
+        <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBox x:Name="VolBox" Style="{StaticResource Num}"/>
+          <TextBlock Text="%" Margin="6,0,0,0" VerticalAlignment="Center" Foreground="#6B7280"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+      <!-- 右下角「设定」：点开才有 关掉全部动画 / 打开设置文件夹 / 卸载 -->
+      <Grid Grid.Row="1" Grid.ColumnSpan="3" Margin="0,16,0,0">
+        <Button x:Name="MoreButton" HorizontalAlignment="Right">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#4B5563" VerticalAlignment="Center"/>
+            <TextBlock Text="设定" Margin="8,0,0,0" VerticalAlignment="Center"/>
+          </StackPanel>
+        </Button>
+        <Popup x:Name="MorePopup" Placement="Top" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+          <Grid Margin="10">
+            <Border Background="White" CornerRadius="10">
+              <Border.Effect>
+                <DropShadowEffect BlurRadius="18" ShadowDepth="3" Direction="270" Opacity="0.18" Color="#000000"/>
+              </Border.Effect>
+            </Border>
+            <Border Background="White" CornerRadius="10" BorderBrush="#E3E6EB" BorderThickness="1" Padding="6">
+              <StackPanel MinWidth="168">
+                <Button x:Name="StopAllButton" Style="{StaticResource MenuItem}" Content="收起正在播放的动画"/>
+                <Button x:Name="FolderButton" Style="{StaticResource MenuItem}" Content="打开设置文件夹"/>
+                <Border Height="1" Background="#EEF0F3" Margin="8,4"/>
+                <Button x:Name="UninstallButton" Style="{StaticResource MenuItemDanger}" Content="卸载…"/>
+              </StackPanel>
+            </Border>
+          </Grid>
+        </Popup>
+      </Grid>
+    </Grid>
+  </Grid>
+</Border>

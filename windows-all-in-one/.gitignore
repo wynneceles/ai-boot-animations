@@ -1,0 +1,6 @@
+# 编译产物：运行 install.ps1 / build.ps1 生成
+/AIBootAnimations.exe
+/AIBootAnimations.exe.config
+
+# 动画视频不重复放进仓库：install.ps1 从本仓库的 Releases 原样下载
+/assets/*/*.mp4
