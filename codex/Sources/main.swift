@@ -324,7 +324,6 @@ final class Show {
     private var dragTrackingUntil: TimeInterval = 0
     private static let dragReleaseGrace: TimeInterval = 0.06
     private var sleeping = false
-    private var playbackPaused = false
     var inLoopAudio = false
     var endObserver: NSObjectProtocol?
     var lastTarget = -1
@@ -370,7 +369,7 @@ final class Show {
             guard let self, self.phase != .done else { return }
             log("时间线放到头，跳回循环开头继续")
             self.player.seek(to: self.timeline.loopStart, toleranceBefore: .zero, toleranceAfter: .zero)
-            if !self.playbackPaused { self.player.play() }
+            self.player.play()
         }
 
         if withIntro {
@@ -443,7 +442,6 @@ final class Show {
                 self.sleeping = true
                 self.dragTrackingUntil = 0
                 self.tick?.invalidate()
-                self.setPlaybackPaused(true)
             })
         workspaceObservers.append(workspace.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -484,19 +482,6 @@ final class Show {
         if phase != .done { scheduleFollow(every: interval) }
     }
 
-    private func setPlaybackPaused(_ paused: Bool) {
-        guard paused != playbackPaused else { return }
-        playbackPaused = paused
-        if paused { player.pause() } else { player.play() }
-    }
-
-    private func updatePlaybackVisibility(_ visible: Bool) {
-        guard phase == .intro || phase == .revealed else { return }
-        // 开屏的音效照常播放，只有静音循环才按可见性暂停。
-        let silentLoop = phase == .revealed && inLoopAudio && player.volume == 0
-        setPlaybackPaused(silentLoop && (!visible || config.residualAlpha <= 0))
-    }
-
     func place(_ t: TargetWindow) {
         let frame = t.cocoaFrame
         guard frame != lastFrame else { return }
@@ -517,7 +502,6 @@ final class Show {
     private func follow() -> TimeInterval {
         guard let t = findTargetWindow(pid: pid, overlayNumber: overlay.windowNumber) else {
             if overlay.isVisible { overlay.orderOut(nil) }
-            updatePlaybackVisibility(false)
             sysAnim = true; stableSince = Date()   // 再出现时多半是从 Dock 还原的动画，等停稳再露面
             if NSRunningApplication(processIdentifier: pid) == nil { finish(fast: true) }
             return 1
@@ -536,7 +520,6 @@ final class Show {
         }
         if sysAnim {
             if overlay.isVisible { overlay.orderOut(nil) }
-            updatePlaybackVisibility(false)
             if Date().timeIntervalSince(stableSince) < 0.18 { return 0.1 }   // 停稳 0.18 秒再回来
             sysAnim = false
             lastFrame = .zero   // 让 place 一定按最新位置重设一次
@@ -562,7 +545,6 @@ final class Show {
                 overlay.order(.above, relativeTo: t.number)
             }
         } else if !wasVisible { overlay.orderFront(nil) }
-        updatePlaybackVisibility(overlay.isVisible && !t.fullyCovered)
         if t.number != lastTarget { lastTarget = t.number; log("跟随窗口 \(t.number)") }
         if t.fullyCovered { return 0.5 }
         guard trackingDrag else { return 0.1 }
