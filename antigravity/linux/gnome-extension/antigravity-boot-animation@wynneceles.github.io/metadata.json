@@ -1,0 +1,14 @@
+{
+  "uuid": "antigravity-boot-animation@wynneceles.github.io",
+  "name": "Antigravity Boot Animation Window Helper",
+  "description": "Tracks Antigravity window geometry and stacks the Gemini boot animation overlay cleanly on GNOME Wayland.",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ],
+  "url": "https://github.com/wynneceles/ai-boot-animations"
+}

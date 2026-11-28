@@ -1,0 +1,47 @@
+#!/bin/sh
+# Antigravity 开机动画（Gemini 芥末泥双剑）· Linux 版启动入口
+# Copyright (C) 2026 wynneceles
+# Licensed under the GNU General Public License v3 (see repository LICENSE).
+
+set -eu
+
+SELF_PATH=$(readlink -f -- "$0" 2>/dev/null || printf '%s\n' "$0")
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SELF_PATH")" && pwd)
+export PYTHONDONTWRITEBYTECODE=1
+
+find_python() {
+    for candidate in "${AGBA_PYTHON:-}" /usr/bin/python3 /usr/local/bin/python3 "$(command -v python3 2>/dev/null || true)"; do
+        [ -n "$candidate" ] && [ -x "$candidate" ] || continue
+        if "$candidate" -c "
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Gdk', '4.0')
+gi.require_version('Gst', '1.0')
+from gi.repository import Gtk, Gdk, Gst
+" >/dev/null 2>&1; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+if ! PY_BIN=$(find_python); then
+    echo "错误：未找到带 PyGObject (GTK4 + GStreamer) 的 Python 3 环境。" >&2
+    echo "Ubuntu/Debian 请安装：sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-gtk4 gstreamer1.0-plugins-good" >&2
+    echo "Fedora 请安装：sudo dnf install python3-gobject gtk4 gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugin-gtk4" >&2
+    echo "Arch 请安装：sudo pacman -S python-gobject gtk4 gst-plugins-base gst-plugins-good gst-plugin-gtk4" >&2
+    exit 1
+fi
+
+case "$PY_BIN" in
+    /usr/bin/python3|/usr/local/bin/python3)
+        if [ -n "${CONDA_PREFIX:-}" ] && [ -n "${GSETTINGS_SCHEMA_DIR:-}" ]; then
+            case "$GSETTINGS_SCHEMA_DIR" in
+                "$CONDA_PREFIX"*) unset GSETTINGS_SCHEMA_DIR ;;
+            esac
+        fi
+        ;;
+esac
+
+exec "$PY_BIN" "$SCRIPT_DIR/src/main.py" "$@"
