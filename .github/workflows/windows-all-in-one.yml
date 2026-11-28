@@ -1,0 +1,70 @@
+# Windows 合并版（Claude / GPT / Gemini / DeepSeek 四合一）自动编译 + 安装测试
+# 编译能不能过；装的时候遇到原版小程序，-KeepOld 要保留、-RemoveOld 要卸掉；程序启动后 15 秒内不崩
+name: windows-all-in-one-test
+on:
+  push:
+    branches: [feat/windows-all-in-one]
+    paths: ['windows-all-in-one/**', '.github/workflows/windows-all-in-one.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: 视频转 H.264（放进合并版 assets，免得安装时去下载）
+        run: |
+          choco install ffmpeg -y --no-progress | Out-Null
+          $env:Path += ";C:\ProgramData\chocolatey\bin"
+          $map = [ordered]@{ claude = 'claude'; gpt = 'codex'; antigravity = 'antigravity'; deepseek = 'deepseek' }
+          foreach ($k in $map.Keys) {
+            $s = $map[$k]; $d = "windows-all-in-one\assets\$k"
+            New-Item -ItemType Directory -Force $d | Out-Null
+            ffmpeg -v error -y -i "$s\assets\intro.mp4" -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -c:a copy "$d\intro.mp4"
+            ffmpeg -v error -y -i "$s\assets\loop.mp4" -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -an "$d\loop.mp4"
+            ffmpeg -v error -y -stream_loop 1 -i "$s\assets\loop.mp4" -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -an "$d\loop-x2.mp4"
+          }
+          Get-ChildItem windows-all-in-one\assets -Recurse -Filter *.mp4 | Format-Table FullName, Length
+      - name: 媒体组件（服务器版 Windows 默认没装）
+        continue-on-error: true
+        run: Install-WindowsFeature Server-Media-Foundation | Format-List
+      - name: 编译
+        run: powershell -ExecutionPolicy Bypass -File windows-all-in-one\build.ps1 -Out "$pwd\build"
+      - name: 安装测试（原版小程序：先保留，再卸掉）
+        run: |
+          $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          if (-not (Test-Path $run)) { New-Item -Path $run -Force | Out-Null }
+          # 假装装过原版 GPT：开机自启指向一个带 uninstall.ps1 的目录，uninstall.ps1 只删自己的开机自启并留个记号
+          $oldDir = "$env:TEMP\OldGPT"
+          New-Item -ItemType Directory -Force $oldDir | Out-Null
+          Set-Content "$oldDir\GPTBootAnimation.exe" 'old'
+          Set-Content "$oldDir\uninstall.ps1" "param([switch]`$Quiet); Remove-ItemProperty -Path '$run' -Name GPTBootAnimation; Set-Content '$oldDir\uninstalled.txt' ok"
+          Set-ItemProperty $run -Name GPTBootAnimation -Value "`"$oldDir\GPTBootAnimation.exe`""
+
+          powershell -ExecutionPolicy Bypass -File windows-all-in-one\install.ps1 -KeepOld
+          Start-Sleep 3
+          Get-Process AIBootAnimations -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (-not (Get-ItemProperty $run -Name GPTBootAnimation -ErrorAction SilentlyContinue)) { throw "-KeepOld 却把原版卸了" }
+          if (Test-Path "$oldDir\uninstalled.txt") { throw "-KeepOld 却跑了原版的 uninstall.ps1" }
+
+          powershell -ExecutionPolicy Bypass -File windows-all-in-one\install.ps1 -RemoveOld
+          Start-Sleep 3
+          Get-Process AIBootAnimations -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (-not (Test-Path "$oldDir\uninstalled.txt")) { throw "-RemoveOld 没卸原版" }
+          if (Get-ItemProperty $run -Name GPTBootAnimation -ErrorAction SilentlyContinue) { throw "-RemoveOld 后原版开机自启还在" }
+          if (-not (Get-ItemProperty $run -Name AIBootAnimations -ErrorAction SilentlyContinue)) { throw "合并版没设开机自启" }
+      - name: 启动不崩
+        run: |
+          $exe = "$pwd\windows-all-in-one\AIBootAnimations.exe"
+          $p = Start-Process $exe -PassThru
+          Start-Sleep 15
+          if ($p.HasExited) { throw "程序 15 秒内退出了，退出码 $($p.ExitCode)" }
+          Stop-Process $p -Force
+          $log = "$env:LOCALAPPDATA\AIBootAnimations\log.txt"
+          if (Test-Path $log) { Get-Content $log -Tail 40 }
+          if ((Test-Path $log) -and (Select-String -Path $log -Pattern 'Exception|异常' -Quiet)) { throw "日志里有异常" }
