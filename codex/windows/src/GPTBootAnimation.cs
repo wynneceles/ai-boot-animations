@@ -1710,41 +1710,10 @@ namespace GPTBootAnimation
             Shutdown();
         }
 
-        // ── 托盘图标和菜单 ──
-        static SD.Icon MakeIcon()
-        {
-            var bmp = new SD.Bitmap(32, 32);
-            using (var g = SD.Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-                Action<float, float, float> star = delegate (float cx, float cy, float r)
-                {
-                    float k = r * 0.28f;
-                    var pts = new[] {
-                        new SD.PointF(cx, cy - r), new SD.PointF(cx + k, cy - k), new SD.PointF(cx + r, cy), new SD.PointF(cx + k, cy + k),
-                        new SD.PointF(cx, cy + r), new SD.PointF(cx - k, cy + k), new SD.PointF(cx - r, cy), new SD.PointF(cx - k, cy - k) };
-                    using (var b = new SD.SolidBrush(SD.Color.FromArgb(255, 190, 210, 255))) g.FillPolygon(b, pts);
-                };
-                // 月牙 + 两颗小星（和 Claude 版的金色 ✨ 区分开）
-                using (var moon = new SD.Drawing2D.GraphicsPath())
-                {
-                    moon.AddEllipse(2, 4, 24, 24);
-                    using (var cut = new SD.Drawing2D.GraphicsPath())
-                    {
-                        cut.AddEllipse(10, 1, 22, 22);
-                        var region = new SD.Region(moon); region.Exclude(cut);
-                        using (var b = new SD.SolidBrush(SD.Color.FromArgb(255, 222, 230, 255))) g.FillRegion(b, region);
-                        region.Dispose();
-                    }
-                }
-                star(25, 8, 5); star(27, 22, 3.5f);
-            }
-            return SD.Icon.FromHandle(bmp.GetHicon());
-        }
-
         void SetupTray()
         {
-            tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "GPT 开机动画", Visible = true };
+            // 编译时将icon作为exe的图标，运行时托盘图标和菜单直接读取自身的icon加载
+            tray = new WF.NotifyIcon { Icon = SD.Icon.ExtractAssociatedIcon(WF.Application.ExecutablePath), Text = "GPT 开机动画", Visible = true };
             var m = new WF.ContextMenuStrip();
             m.Items.Add(new WF.ToolStripLabel("打开 ChatGPT 时") { Enabled = false });
             introItem = new WF.ToolStripMenuItem("播放开屏动画");

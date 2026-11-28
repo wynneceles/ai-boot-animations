@@ -1710,34 +1710,10 @@ namespace AntigravityBootAnimation
             Shutdown();
         }
 
-        // ── 托盘图标和菜单 ──
-        static SD.Icon MakeIcon()
-        {
-            var bmp = new SD.Bitmap(32, 32);
-            using (var g = SD.Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-                // 一颗弧边四芒星（像 Gemini 标志），蓝→紫渐变，和 Claude 的金色 ✨、GPT 的月牙区分开
-                using (var path = new SD.Drawing2D.GraphicsPath())
-                {
-                    float c = 16, r = 15, q = 1.5f;   // 中心、尖端半径、弧线往中心收的程度
-                    path.StartFigure();
-                    path.AddBezier(c, c - r, c + q, c - q, c + q, c - q, c + r, c);
-                    path.AddBezier(c + r, c, c + q, c + q, c + q, c + q, c, c + r);
-                    path.AddBezier(c, c + r, c - q, c + q, c - q, c + q, c - r, c);
-                    path.AddBezier(c - r, c, c - q, c - q, c - q, c - q, c, c - r);
-                    path.CloseFigure();
-                    using (var b = new SD.Drawing2D.LinearGradientBrush(new SD.PointF(2, 30), new SD.PointF(30, 2),
-                        SD.Color.FromArgb(255, 66, 133, 244), SD.Color.FromArgb(255, 180, 140, 255)))
-                        g.FillPath(b, path);
-                }
-            }
-            return SD.Icon.FromHandle(bmp.GetHicon());
-        }
-
         void SetupTray()
         {
-            tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "Gemini 开机动画", Visible = true };
+            // 编译时将icon作为exe的图标，运行时托盘图标和菜单直接读取自身的icon加载
+            tray = new WF.NotifyIcon { Icon = SD.Icon.ExtractAssociatedIcon(WF.Application.ExecutablePath), Text = "Gemini 开机动画", Visible = true };
             var m = new WF.ContextMenuStrip();
             m.Items.Add(new WF.ToolStripLabel("打开 Antigravity 时") { Enabled = false });
             introItem = new WF.ToolStripMenuItem("播放开屏动画");

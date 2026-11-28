@@ -1718,34 +1718,10 @@ namespace DeepSeekBootAnimation
             Shutdown();
         }
 
-        // ── 托盘图标和菜单 ──
-        static SD.Icon MakeIcon()
-        {
-            var bmp = new SD.Bitmap(32, 32);
-            using (var g = SD.Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-                // 一条小鱼（大肥鱼，和 Mac 版菜单栏的 fish 图标对应），深海蓝→青渐变（DeepSeek 鲸鱼蓝），眼睛镂空
-                using (var path = new SD.Drawing2D.GraphicsPath(SD.Drawing2D.FillMode.Alternate))
-                {
-                    path.StartFigure();
-                    path.AddBezier(3f, 16f, 8f, 6f, 18f, 6f, 23f, 15f);          // 背
-                    path.AddLines(new[] { new SD.PointF(23f, 15f), new SD.PointF(30f, 8f), new SD.PointF(27f, 16f),
-                                          new SD.PointF(30f, 24f), new SD.PointF(23f, 17f) });   // 鱼尾
-                    path.AddBezier(23f, 17f, 18f, 26f, 8f, 26f, 3f, 16f);        // 肚子
-                    path.CloseFigure();
-                    path.AddEllipse(7.2f, 12.7f, 3.6f, 3.6f);                   // 眼睛（交替填充 = 镂空）
-                    using (var b = new SD.Drawing2D.LinearGradientBrush(new SD.PointF(2, 30), new SD.PointF(30, 2),
-                        SD.Color.FromArgb(255, 77, 107, 254), SD.Color.FromArgb(255, 90, 210, 255)))
-                        g.FillPath(b, path);
-                }
-            }
-            return SD.Icon.FromHandle(bmp.GetHicon());
-        }
-
         void SetupTray()
         {
-            tray = new WF.NotifyIcon { Icon = MakeIcon(), Text = "DeepSeek 开机动画", Visible = true };
+            // 编译时将icon作为exe的图标，运行时托盘图标和菜单直接读取自身的icon加载
+            tray = new WF.NotifyIcon { Icon = SD.Icon.ExtractAssociatedIcon(WF.Application.ExecutablePath), Text = "DeepSeek 开机动画", Visible = true };
             var m = new WF.ContextMenuStrip();
             m.Items.Add(new WF.ToolStripLabel("打开 DeepSeek Harness 时") { Enabled = false });
             introItem = new WF.ToolStripMenuItem("播放开屏动画");
