@@ -105,9 +105,10 @@ func log(_ msg: String) {
 
 // MARK: - 找 ChatGPT 的主窗口（只读位置、PID、层级，不读标题，不需要任何授权）
 
-struct TargetWindow { let number: Int; let cocoaFrame: NSRect; let coveredByOtherApp: Bool }
+/// overlayFrame：传了浮层窗口编号时，浮层在同一份窗口列表里的位置（Cocoa 坐标）；两边从同一份列表取，滑动中才不会各取到不同的一帧
+struct TargetWindow { let number: Int; let cocoaFrame: NSRect; let coveredByOtherApp: Bool; let overlayFrame: NSRect? }
 
-func findTargetWindow(pid: pid_t) -> TargetWindow? {
+func findTargetWindow(pid: pid_t, overlay: Int? = nil) -> TargetWindow? {
     guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                 kCGNullWindowID) as? [[String: Any]] else { return nil }
     var best: (Int, CGRect)?
@@ -136,9 +137,13 @@ func findTargetWindow(pid: pid_t) -> TargetWindow? {
         }
     }
     // CG 坐标原点在主屏左上角，Cocoa 在主屏左下角
-    let y = primary.frame.height - r.origin.y - r.height
-    return TargetWindow(number: num, cocoaFrame: NSRect(x: r.origin.x, y: y, width: r.width, height: r.height),
-                        coveredByOtherApp: covered)
+    func cocoa(_ r: CGRect) -> NSRect { NSRect(x: r.origin.x, y: primary.frame.height - r.origin.y - r.height, width: r.width, height: r.height) }
+    var overlayFrame: NSRect?
+    if let overlay, let w = list.first(where: { ($0[kCGWindowNumber as String] as? Int) == overlay }),
+       let b = w[kCGWindowBounds as String] as? [String: CGFloat] {
+        overlayFrame = cocoa(CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0))
+    }
+    return TargetWindow(number: num, cocoaFrame: cocoa(r), coveredByOtherApp: covered, overlayFrame: overlayFrame)
 }
 
 // MARK: - 把成片 + 循环拼成一整条（约 8 小时），播放器全程只放一个文件，接缝不会卡；放到头再跳回循环开头
@@ -337,6 +342,8 @@ final class Show {
     var lastFrame = NSRect.zero
     var sysAnim = false          // 窗口在做系统动画（最小化、还原、缩放、分屏）时浮层先藏起来
     var stableSince = Date()
+    enum SpaceState { case none, sliding, away }
+    var spaceState = SpaceState.none   // 浮层正跟着桌面一起滑（sliding），或 ChatGPT 已经随桌面滑走、浮层留在它的桌面上（away）
     private(set) var paused = false   // 菜单「暂停循环背景」：画面停在当前这一帧，背景照样盖着
 
     init(pid: pid_t, target: TargetWindow, config: Config, withIntro: Bool,
@@ -433,7 +440,10 @@ final class Show {
                 self.lastOtherActivation = Date()
                 if self.overlay.level != .normal {
                     for w in [self.overlay, self.subWin, self.skipWin] { w.level = .normal }
-                    if self.lastTarget >= 0 { self.overlay.order(.above, relativeTo: self.lastTarget) }
+                    // 切桌面时别的 App 会在新桌面上到前台，这时浮层不在当前桌面，重新排序会把它带到新桌面上
+                    if self.lastTarget >= 0 && self.spaceState == .none && self.overlay.isOnActiveSpace {
+                        self.overlay.order(.above, relativeTo: self.lastTarget)
+                    }
                 }
             }
             self?.follow()
@@ -454,9 +464,15 @@ final class Show {
     /// 跟着 ChatGPT 窗口移动/缩放，并保持正好压在它上面（不会盖到别的 App 的窗口）
     func follow() {
         guard phase != .done else { return }
-        guard let t = findTargetWindow(pid: pid) else {
-            if overlay.isVisible { overlay.orderOut(nil) }
-            sysAnim = true; stableSince = Date()   // 再出现时多半是从 Dock 还原的动画，等停稳再露面
+        guard let t = findTargetWindow(pid: pid, overlay: overlay.windowNumber) else {
+            // 刚才正跟着桌面滑，或浮层不在当前桌面 = 用户切到别的桌面了：浮层留在 ChatGPT 那个桌面上，切回来时跟着桌面一起滑进来，不用等。
+            // 滑走的那一刻 isOnActiveSpace 可能还没更新，不能单靠它
+            if overlay.isVisible && (spaceState != .none || !overlay.isOnActiveSpace) {
+                if spaceState != .away { spaceState = .away; log("ChatGPT 在别的桌面，浮层留在它的桌面上") }
+            } else {
+                if overlay.isVisible { overlay.orderOut(nil) }
+                sysAnim = true; stableSince = Date()   // 再出现时多半是从 Dock 还原的动画，等停稳再露面
+            }
             if NSRunningApplication(processIdentifier: pid) == nil { finish(fast: true) }
             return
         }
@@ -464,6 +480,25 @@ final class Show {
         // 最小化的神灯效果会把窗口拧成漏斗形，矩形视频怎么跟都对不上，干脆先藏起来；
         // 用户自己拖动、拉伸窗口时鼠标是按着的，照常跟随
         let mouseDown = NSEvent.pressedMouseButtons & 1 != 0
+        // 大小没变、鼠标没按着，而且浮层被挪离了 place() 放的位置、挪的距离和 ChatGPT 窗口一样 = 系统正在平移整个桌面（切桌面，含滑到一半停住）：
+        // 浮层和 ChatGPT 窗口会被一起平移，不藏也不动它；滑动中回报的位置不能拿来 place，否则会被移两次。
+        // 浮层明明显示着、却不在屏幕上的窗口列表里 = 它所在的桌面已经滑出画面，ChatGPT 窗口这时还可能以偏移一整屏的位置留在列表里，一样当成切桌面。
+        // 两边挪得不一样多（例如拔掉外接显示器、改分辨率，系统各自挪窗口）就不是切桌面，照下面原本的做法藏起来、停稳再贴回去
+        let movedWithDesktop: Bool
+        if let o = t.overlayFrame {
+            movedWithDesktop = (abs(o.minX - lastFrame.minX) >= 1 || abs(o.minY - lastFrame.minY) >= 1)
+                && abs(o.minX - t.cocoaFrame.minX) < 1 && abs(o.minY - t.cocoaFrame.minY) < 1
+        } else {
+            movedWithDesktop = true
+        }
+        if t.cocoaFrame != lastFrame && !sysAnim && overlay.isVisible && !mouseDown
+            && abs(t.cocoaFrame.width - lastFrame.width) < 1 && abs(t.cocoaFrame.height - lastFrame.height) < 1
+            && movedWithDesktop {
+            if spaceState != .sliding { spaceState = .sliding; log("切桌面：浮层跟着桌面一起平移，不藏也不动它") }
+            return
+        }
+        let wasFollowingSpace = spaceState != .none
+        spaceState = .none
         if t.cocoaFrame != lastFrame {
             if !mouseDown && !sysAnim && overlay.isVisible { log("窗口在做系统动画，浮层先藏起来"); sysAnim = true }
             if sysAnim { stableSince = Date(); lastFrame = t.cocoaFrame }
@@ -476,7 +511,8 @@ final class Show {
             log("窗口停稳，浮层回来")
         }
         place(t)
-        if overlay.isVisible && !overlay.isOnActiveSpace { overlay.orderOut(nil) }   // 目标窗口被挪到别的桌面：重新显示一次，浮层才会跟过去
+        // 目标窗口被挪到别的桌面：重新显示一次，浮层才会跟过去。刚跟着桌面滑回来时 isOnActiveSpace 可能还没更新，不能当成被挪走
+        if !wasFollowingSpace && overlay.isVisible && !overlay.isOnActiveSpace { overlay.orderOut(nil) }
         // ChatGPT 窗口没被别的 App 压着（不管 ChatGPT 在不在前台）：浮层放到浮动层级，点 ChatGPT 时它把自己窗口提上来也盖不过浮层
         //   （以前只在 ChatGPT 在前台时才升，别的 App 最小化后再点 ChatGPT，ChatGPT 会先盖过浮层一两帧，看着就是闪黑）
         // 被别的 App 压着：降回普通层级，紧贴在 ChatGPT 窗口上方，不会盖住别的 App（这种情况点 ChatGPT 仍可能轻微闪一下：ChatGPT 提窗口比外部程序快，抢不过）
