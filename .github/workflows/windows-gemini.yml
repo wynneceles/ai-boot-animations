@@ -80,13 +80,21 @@ jobs:
           $app = Start-Process build\AntigravityBootAnimation.exe -PassThru -ArgumentList "--target-title Notepad --play intro --test-skip 3 --exit-after 8 --shot-at 2.5,3.4,4.5,7 --shot-dir `"$pwd\out\skip`"" 
           $app | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
           Stop-Process $np -Force
-      - name: 只开循环背景
+      - name: 只开循环背景（检查：浮层确实是分层窗口、点击能穿透到下面的窗口）
         run: |
+          $log = "$env:LOCALAPPDATA\AntigravityBootAnimation\log.txt"
+          $before = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue).Count
           $np = Start-Process notepad -WindowStyle Maximized -PassThru
           Start-Sleep 3
           $app = Start-Process build\AntigravityBootAnimation.exe -PassThru -ArgumentList "--target-title Notepad --play loop --exit-after 14 --shot-at 2,6,12 --shot-dir `"$pwd\out\loop`"" 
           $app | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
           Stop-Process $np -Force
+          $new = @(@(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue) | Select-Object -Skip $before)
+          $new | ForEach-Object { Write-Host $_ }
+          if (-not ($new | Where-Object { $_.Contains('layered=1') })) { throw "overlay is not a layered window" }
+          $hits = @($new | Where-Object { $_.Contains(' hit=') })
+          if ($hits.Count -eq 0) { throw "no snapshot hit-test lines" }
+          if ($hits | Where-Object { -not $_.Contains('hit=target') }) { throw "click does not pass through to the target window" }
       - name: 循环背景卡住后自愈（每 0.8 秒强制接缝，每 10 秒故意卡一次）
         run: |
           $log = "$env:LOCALAPPDATA\AntigravityBootAnimation\log.txt"
@@ -103,6 +111,29 @@ jobs:
           $healed = [string]::Concat([char[]](0x6062,0x590D,0x6210,0x529F))
           if (-not ($new | Where-Object { $_.Contains($recover) })) { throw "self-heal test: no recovery in log" }
           if (-not ($new | Where-Object { $_.Contains($healed) })) { throw "self-heal test: loop did not move again after recovery" }
+      - name: 待命播放器换失败不影响画面（#7：每换 2 次故意失败 1 次，不许触发重建）
+        run: |
+          $log = "$env:LOCALAPPDATA\AntigravityBootAnimation\log.txt"
+          $before = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue).Count
+          $np = Start-Process notepad -WindowStyle Maximized -PassThru
+          Start-Sleep 3
+          $app = Start-Process build\AntigravityBootAnimation.exe -PassThru -ArgumentList "--target-title Notepad --play loop --exit-after 30 --legacy-loop --loop-cut 0.8 --recycle-every 2 --standby-fail-test 2 --heartbeat 4"
+          $app | Wait-Process -Timeout 90 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
+          Stop-Process $np -Force
+          $new = @(@(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue) | Select-Object -Skip $before)
+          $new | ForEach-Object { Write-Host $_ }
+          # 「没换成」「自动恢复（」「运行中」
+          $failed = [string]::Concat([char[]](0x6CA1,0x6362,0x6210))
+          $recover = [string]::Concat([char[]](0x81EA,0x52A8,0x6062,0x590D,0xFF08))
+          $beat = [string]::Concat([char[]](0x8FD0,0x884C,0x4E2D))
+          $fails = @($new | Where-Object { $_.Contains($failed) })
+          if ($fails.Count -lt 2) { throw "standby-fail test: injected failures not seen ($($fails.Count))" }
+          if ($new | Where-Object { $_.Contains($recover) }) { throw "standby-fail test: a standby failure still triggered a full rebuild" }
+          $beats = @($new | Where-Object { $_.Contains($beat) })
+          if ($beats.Count -lt 2) { throw "standby-fail test: no heartbeat lines" }
+          $laps = [int]([regex]::Match($beats[-1].Substring($beats[-1].IndexOf($beat)), '\d+').Value)
+          Write-Host "laps at last heartbeat: $laps"
+          if ($laps -lt 10) { throw "standby-fail test: loop stopped advancing (laps=$laps)" }
       - name: 闪屏检测（录屏逐帧看亮度突变：老办法接缝 / 重叠交接 / 开屏接循环 / 卡住重建）
         run: |
           $env:Path += ";C:\ProgramData\chocolatey\bin"
@@ -146,6 +177,37 @@ jobs:
             Remove-Item out\seam\$mode.mp4 -ErrorAction SilentlyContinue   # 录屏不推到仓库，只留数据
           }
           if (Test-Path $cfgBak) { Move-Item $cfgBak "$cfgDir\config.json" -Force } else { Remove-Item "$cfgDir\config.json" -ErrorAction SilentlyContinue }
+      - name: 性能对比（老的逐像素透明 / 新的外壳窗口 / 完全不透明的下限；云端没有显卡、是软件渲染，CPU 只能看相对差别；截图亮度要对得上）
+        run: |
+          $log = "$env:LOCALAPPDATA\AntigravityBootAnimation\log.txt"
+          New-Item -ItemType Directory -Force out\perf | Out-Null
+          # 「性能：」用码位拼，免得脚本编码出岔子
+          $tag = [string]::Concat([char[]](0x6027,0x80FD,0xFF1A))
+          Add-Type -AssemblyName System.Drawing
+          function MeanY($path) {
+            $img = [Drawing.Bitmap]::FromFile($path); $sum = 0; $n = 0
+            for ($y = 0; $y -lt $img.Height; $y += 8) { for ($x = 0; $x -lt $img.Width; $x += 8) { $c = $img.GetPixel($x, $y); $sum += 0.299 * $c.R + 0.587 * $c.G + 0.114 * $c.B; $n++ } }
+            $img.Dispose(); return $sum / $n
+          }
+          $bright = @{}
+          foreach ($mode in @('perpixel', 'hosted', 'opaque')) {
+            $before = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue).Count
+            $np = Start-Process notepad -WindowStyle Maximized -PassThru
+            Start-Sleep 3
+            $app = Start-Process build\AntigravityBootAnimation.exe -PassThru -ArgumentList "--target-title Notepad --play loop --exit-after 50 --perf-log 10 --overlay-mode $mode --shot-at 20 --shot-dir `"$pwd\out\perf\$mode`""
+            $app | Wait-Process -Timeout 90 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
+            Stop-Process $np -Force -ErrorAction SilentlyContinue
+            $new = @(@(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue) | Select-Object -Skip $before)
+            "[$mode]" | Tee-Object -Append out\perf\summary.txt
+            $new | Where-Object { $_.Contains($tag) } | Tee-Object -Append out\perf\summary.txt
+            $shot = Get-ChildItem "out\perf\$mode" -Filter *.png -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($shot) { $bright[$mode] = MeanY $shot.FullName; ("[$mode] screenshot mean brightness {0:N1}" -f $bright[$mode]) | Tee-Object -Append out\perf\summary.txt }
+          }
+          # 新浮层在默认 25% 透明度下，看上去要和老浮层一样（差太多说明透明没生效，比如整块不透明）
+          if (-not $bright.ContainsKey('perpixel') -or -not $bright.ContainsKey('hosted')) { throw "missing perf screenshots" }
+          $d = [Math]::Abs($bright['hosted'] - $bright['perpixel'])
+          ("hosted vs perpixel brightness diff {0:N1}" -f $d) | Tee-Object -Append out\perf\summary.txt
+          if ($d -gt 12) { throw "hosted overlay does not look like the per-pixel one (alpha not applied?)" }
       - name: 收集日志
         if: always()
         run: |

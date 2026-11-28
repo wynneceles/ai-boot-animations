@@ -333,6 +333,7 @@ final class Show {
     var lastFrame = NSRect.zero
     var sysAnim = false          // 窗口在做系统动画（最小化、还原、缩放、分屏）时浮层先藏起来
     var stableSince = Date()
+    private(set) var paused = false   // 菜单「暂停循环背景」：画面停在当前这一帧，背景照样盖着
 
     init(pid: pid_t, target: TargetWindow, config: Config, withIntro: Bool,
          timeline: Timeline, onDone: @escaping () -> Void) {
@@ -368,7 +369,7 @@ final class Show {
         // 一整条（约 8 小时）放完后跳回循环段开头继续，背景不会掉
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-            guard let self, self.phase != .done else { return }
+            guard let self, self.phase != .done, !self.paused else { return }
             log("时间线放到头，跳回循环开头继续")
             self.player.seek(to: self.timeline.loopStart, toleranceBefore: .zero, toleranceAfter: .zero)
             self.player.play()
@@ -566,6 +567,14 @@ final class Show {
         // 开屏音效（冲击声、闪光）照常放完，等进入循环文件再换音量
     }
 
+    /// 暂停 / 继续循环背景。只在循环背景阶段有用；开屏还在放时不让暂停
+    func setPaused(_ p: Bool) {
+        guard phase == .revealed, p != paused else { return }
+        paused = p
+        if p { player.pause() } else { player.play() }
+        log(p ? "暂停循环背景" : "继续播放循环背景")
+    }
+
     /// 菜单里拖滑块时实时生效
     func apply(_ c: Config) {
         config = c
@@ -707,7 +716,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
     var introItem: NSMenuItem!
     var loopItem: NSMenuItem!
-    var stopItem: NSMenuItem!
+    var loopNowItem: NSMenuItem!   // 开着背景时是「关掉循环背景」，没开时是「开启循环背景」
+    var pauseItem: NSMenuItem!
     var alphaRow: SliderRow!
     var introVolRow: SliderRow!
     var show: Show?
@@ -827,6 +837,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.isVisible = targetRunning
         statusItem.button?.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Claude 开机动画")
         let m = NSMenu(); m.delegate = self
+        m.autoenablesItems = false   // 「暂停」在没开背景时要变灰，由 refreshMenu 自己定
 
         let h1 = NSMenuItem(title: "打开 Claude 时", action: nil, keyEquivalent: ""); h1.isEnabled = false
         m.addItem(h1)
@@ -845,8 +856,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let h2 = NSMenuItem(title: "现在，在 Claude 窗口上", action: nil, keyEquivalent: ""); h2.isEnabled = false
         m.addItem(h2)
         item("播放一次开屏动画", #selector(previewIntro), m)
-        item("开启循环背景", #selector(previewLoop), m)
-        stopItem = item("关掉动画 / 背景", #selector(stopShow), m)
+        loopNowItem = item("开启循环背景", #selector(toggleLoopNow), m)
+        pauseItem = item("暂停循环背景", #selector(togglePause), m)
         m.addItem(.separator())
         item("设置窗口…", #selector(openSettings), m)
         item("打开设置文件…", #selector(openConfig), m)
@@ -875,7 +886,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings?.refresh()
         introItem.state = config.playIntro ? .on : .off
         loopItem.state = config.loopBackground ? .on : .off
-        stopItem.isEnabled = show != nil
+        // 正在放（开屏或循环背景）就显示「关掉…」，没在放就显示「开启循环背景」
+        let s = show.flatMap { $0.phase == .intro || $0.phase == .revealed ? $0 : nil }
+        loopNowItem.title = s == nil ? "开启循环背景" : (s!.phase == .intro ? "关掉开屏动画" : "关掉循环背景")
+        pauseItem.title = s?.paused == true ? "继续播放循环背景" : "暂停循环背景"
+        pauseItem.isEnabled = s?.phase == .revealed
         alphaRow.slider.doubleValue = config.residualAlpha; alphaRow.refreshLabel()
         introVolRow.slider.doubleValue = config.introVolume; introVolRow.refreshLabel()
     }
@@ -889,6 +904,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func previewIntro() { show?.teardown(); _ = startOnCurrentWindow(withIntro: true, exitWhenDone: false) }
     @objc func previewLoop() { show?.teardown(); _ = startOnCurrentWindow(withIntro: false, exitWhenDone: false) }
     @objc func stopShow() { show?.finish(fast: true) }
+    @objc func toggleLoopNow() {
+        if let s = show, s.phase == .intro || s.phase == .revealed { s.finish(fast: true) } else { previewLoop() }
+    }
+    @objc func togglePause() { guard let s = show else { return }; s.setPaused(!s.paused) }
     @objc func openConfig() { NSWorkspace.shared.open(Config.file) }
 
     /// 彻底卸载：删登录项、小程序、设置、日志，然后退出。Claude.app 从来没被改过，不用还原。

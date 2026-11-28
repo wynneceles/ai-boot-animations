@@ -105,9 +105,15 @@ func log(_ msg: String) {
 
 // MARK: - 找 ChatGPT 的主窗口（只读位置、PID、层级，不读标题，不需要任何授权）
 
-struct TargetWindow { let number: Int; let cocoaFrame: NSRect; let coveredByOtherApp: Bool }
+struct TargetWindow {
+    let number: Int
+    let cocoaFrame: NSRect
+    let coveredByOtherApp: Bool
+    let fullyCovered: Bool
+    let overlayNeedsOrdering: Bool
+}
 
-func findTargetWindow(pid: pid_t) -> TargetWindow? {
+func findTargetWindow(pid: pid_t, overlayNumber: Int? = nil) -> TargetWindow? {
     guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                 kCGNullWindowID) as? [[String: Any]] else { return nil }
     var best: (Int, CGRect)?
@@ -125,81 +131,64 @@ func findTargetWindow(pid: pid_t) -> TargetWindow? {
     // 列表由前到后排；排在 ChatGPT 窗口前面、又和它重叠的别家窗口，代表 ChatGPT 窗口被盖住了
     let me = getpid()
     var covered = false
+    var fullyCovered = false
+    var overlayAboveTarget = false
+    var coveringWindowBelowOverlay = false
     for w in list {
-        if (w[kCGWindowNumber as String] as? Int) == num { break }
+        let number = w[kCGWindowNumber as String] as? Int
+        if number == num { break }
+        if let overlayNumber, number == overlayNumber { overlayAboveTarget = true }
         guard let owner = w[kCGWindowOwnerPID as String] as? Int32, owner != pid, owner != me,
               (w[kCGWindowLayer as String] as? Int) == 0,
               let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
         if let a = w[kCGWindowAlpha as String] as? Double, a <= 0 { continue }
-        if CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0).intersects(r) {
-            covered = true; break
+        let bounds = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+        if bounds.intersects(r) {
+            covered = true
+            if overlayAboveTarget { coveringWindowBelowOverlay = true }
+            if bounds.contains(r), (w[kCGWindowAlpha as String] as? Double ?? 1) >= 1 { fullyCovered = true }
         }
     }
     // CG 坐标原点在主屏左上角，Cocoa 在主屏左下角
     let y = primary.frame.height - r.origin.y - r.height
     return TargetWindow(number: num, cocoaFrame: NSRect(x: r.origin.x, y: y, width: r.width, height: r.height),
-                        coveredByOtherApp: covered)
+                        coveredByOtherApp: covered, fullyCovered: fullyCovered,
+                        overlayNeedsOrdering: !overlayAboveTarget || coveringWindowBelowOverlay)
 }
 
-// MARK: - 把成片 + 循环拼成一整条（约 8 小时），播放器全程只放一个文件，接缝不会卡；放到头再跳回循环开头
+// MARK: - 把开屏和循环拼成一条时间线，放到末尾后跳回循环开始处
 
 struct Timeline { let asset: AVAsset; let loopStart: CMTime }
 
-func buildTimeline(intro: URL?, loop: URL, repeats: Int = 5000) -> Timeline {   // 5000 段 ≈ 8 小时
+func buildTimeline(intro: URL?, loop: URL, repeats: Int) -> Timeline {
     let comp = AVMutableComposition()
-    let vT = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
-    let aT = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
+    let video = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
+    let audio = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
     var cursor = CMTime.zero
 
-    func append(_ url: URL) {
+    func append(_ url: URL, count: Int) {
         let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
-        guard let sv = asset.tracks(withMediaType: .video).first else { return }
-        let vDur = sv.timeRange.duration
-        try? vT.insertTimeRange(CMTimeRange(start: sv.timeRange.start, duration: vDur), of: sv, at: cursor)
-        if vT.preferredTransform != sv.preferredTransform { vT.preferredTransform = sv.preferredTransform }
-        if let sa = asset.tracks(withMediaType: .audio).first {
-            let aDur = CMTimeMinimum(sa.timeRange.duration, vDur)
-            try? aT.insertTimeRange(CMTimeRange(start: sa.timeRange.start, duration: aDur), of: sa, at: cursor)
+        guard let sourceVideo = asset.tracks(withMediaType: .video).first else { return }
+        let videoRange = sourceVideo.timeRange
+        let sourceAudio = asset.tracks(withMediaType: .audio).first
+        let audioRange = sourceAudio.map {
+            let range = $0.timeRange
+            return CMTimeRange(start: range.start, duration: CMTimeMinimum(range.duration, videoRange.duration))
         }
-        cursor = cursor + vDur
-    }
-
-    if let intro { append(intro) }
-    let loopStart = cursor
-    for _ in 0..<repeats { append(loop) }
-    return Timeline(asset: comp.copy() as! AVComposition, loopStart: loopStart)
-}
-
-/// 8 小时的时间线拼起来要好几秒，所以目标应用一启动就在后台拼（应用没开时不拼、不占内存，关掉后就释放）。
-/// 先拼一条短的（300 段，不到 1 秒）应急，再拼长的；放到头照样跳回循环开头继续。
-final class TimelineCache {
-    let introURL: URL, loopURL: URL, repeats: Int
-    private var ready: [Bool: Timeline] = [:]
-    private var short: [Bool: Timeline] = [:]
-    init(introURL: URL, loopURL: URL, repeats: Int, variants: [Bool]) {
-        self.introURL = introURL; self.loopURL = loopURL; self.repeats = repeats
-        for withIntro in variants {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let s = buildTimeline(intro: withIntro ? introURL : nil, loop: loopURL, repeats: min(repeats, 300))
-                DispatchQueue.main.async { self?.short[withIntro] = s }
-                guard self != nil else { return }
-                let t0 = Date()
-                let t = buildTimeline(intro: withIntro ? introURL : nil, loop: loopURL, repeats: repeats)
-                DispatchQueue.main.async {
-                    guard let self else { return }   // 中途已经释放（应用关了）就丢掉
-                    self.ready[withIntro] = t; self.short[withIntro] = nil
-                    log("后台时间线准备好（\(withIntro ? "开屏+循环" : "只循环")，\(repeats) 段，\(Int(Date().timeIntervalSince(t0) * 1000))ms）")
-                }
+        video.preferredTransform = sourceVideo.preferredTransform
+        for _ in 0..<count {
+            try? video.insertTimeRange(videoRange, of: sourceVideo, at: cursor)
+            if let sourceAudio, let audioRange {
+                try? audio.insertTimeRange(audioRange, of: sourceAudio, at: cursor)
             }
+            cursor = cursor + videoRange.duration
         }
     }
-    var isReady: Bool { !ready.isEmpty }
-    func get(withIntro: Bool) -> Timeline {
-        if let t = ready[withIntro] { return t }
-        if let t = short[withIntro] { log("长时间线还没好，先用短的"); return t }
-        log("后台时间线还没好，现场拼短的顶上")
-        return buildTimeline(intro: withIntro ? introURL : nil, loop: loopURL, repeats: min(repeats, 300))
-    }
+
+    if let intro { append(intro, count: 1) }
+    let loopStart = cursor
+    append(loop, count: repeats)
+    return Timeline(asset: comp.copy() as! AVComposition, loopStart: loopStart)
 }
 
 // MARK: - 视图
@@ -311,7 +300,7 @@ final class Show {
     let pid: pid_t
     var config: Config
     let withIntro: Bool
-    let onDone: () -> Void
+    let onDone: (Show) -> Void
     var phase = Phase.intro
 
     let overlay: NSWindow
@@ -330,27 +319,33 @@ final class Show {
     var timeObserver: Any?
     var volObserver: Any?
     var readyObs: NSKeyValueObservation?
-    var activateObs: NSObjectProtocol?
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var mouseMonitor: Any?
+    private var dragTrackingUntil: TimeInterval = 0
+    private static let dragReleaseGrace: TimeInterval = 0.06
+    private var sleeping = false
     var inLoopAudio = false
     var endObserver: NSObjectProtocol?
     var lastTarget = -1
     var lastFrame = NSRect.zero
     var sysAnim = false          // 窗口在做系统动画（最小化、还原、缩放、分屏）时浮层先藏起来
     var stableSince = Date()
+    private(set) var paused = false   // 菜单「暂停循环背景」：画面停在当前这一帧，背景照样盖着
 
     init(pid: pid_t, target: TargetWindow, config: Config, withIntro: Bool,
-         timeline: Timeline, onDone: @escaping () -> Void) {
+         timeline: Timeline, onDone: @escaping (Show) -> Void) {
         self.pid = pid; self.config = config; self.withIntro = withIntro; self.onDone = onDone
         self.timeline = timeline
         item = AVPlayerItem(asset: timeline.asset)
-        item.add(videoOut)   // 点「跳过」时用来截当前这一帧做淡出
+        if withIntro { item.add(videoOut) }   // 点「跳过」时用来截当前这一帧做淡出
 
         overlay = makeBorderlessWindow(target.cocoaFrame)
         playerView = PlayerView(frame: NSRect(origin: .zero, size: target.cocoaFrame.size))
         playerView.autoresizingMask = [.width, .height]
         overlay.contentView = playerView
 
-        skipWin = makeBorderlessWindow(NSRect(x: 0, y: 0, width: 72, height: 28))
+        let frame = target.cocoaFrame
+        skipWin = makeBorderlessWindow(NSRect(x: frame.maxX - 90, y: frame.maxY - 72, width: 72, height: 28))
         let btn = SkipButtonView(frame: NSRect(x: 0, y: 0, width: 72, height: 28))
         skipWin.contentView = btn
 
@@ -369,10 +364,10 @@ final class Show {
         player.replaceCurrentItem(with: item)
         player.actionAtItemEnd = .none
 
-        // 一整条（约 8 小时）放完后跳回循环段开头继续，背景不会掉
+        // 放完后跳回循环开头，避免重播开屏。
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-            guard let self, self.phase != .done else { return }
+            guard let self, self.phase != .done, !self.paused else { return }
             log("时间线放到头，跳回循环开头继续")
             self.player.seek(to: self.timeline.loopStart, toleranceBefore: .zero, toleranceAfter: .zero)
             self.player.play()
@@ -392,7 +387,8 @@ final class Show {
             }
             // 开屏音轨放完（成片结束、进入循环文件）时，音量换成循环背景音量
             volObserver = player.addBoundaryTimeObserver(forTimes: [NSValue(time: timeline.loopStart)], queue: .main) { [weak self] in
-                guard let self, self.phase == .revealed else { return }
+                guard let self, self.phase == .revealed, !self.inLoopAudio else { return }
+                self.hideSubtitles()
                 self.inLoopAudio = true
                 self.rampVolume(to: 0, over: 1.5)   // 循环段只是风声，静音
             }
@@ -422,9 +418,38 @@ final class Show {
             }
         }
 
-        tick = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.follow() }
-        RunLoop.main.add(tick!, forMode: .common)   // 拖动菜单、窗口时也继续跟随
-        activateObs = NSWorkspace.shared.notificationCenter.addObserver(
+        scheduleFollow(every: 0.1)
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+            guard let self, !self.sleeping, self.phase != .done else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            if event.type == .leftMouseDown {
+                guard self.overlay.isVisible,
+                      self.lastFrame.insetBy(dx: -8, dy: -8).contains(NSEvent.mouseLocation) else { return }
+            } else {
+                guard now <= self.dragTrackingUntil else { return }
+            }
+            // 先捕获按下，避免等到低频定时器才发现拖动；松手后再跟几帧。
+            self.dragTrackingUntil = now + Self.dragReleaseGrace
+            self.refreshTracking()
+        }
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspaceObservers.append(workspace.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.refreshTracking()
+            })
+        workspaceObservers.append(workspace.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                guard let self, self.phase != .done else { return }
+                self.sleeping = true
+                self.dragTrackingUntil = 0
+                self.tick?.invalidate()
+            })
+        workspaceObservers.append(workspace.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.sleeping = false
+                self?.refreshTracking()
+            })
+        workspaceObservers.append(workspace.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] n in
             let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             // 别的 App 到前台：它的窗口可能马上盖到 ChatGPT 上，窗口列表要晚几十毫秒才反映出来，先立刻降回普通层级，免得浮层压在它上面
@@ -435,41 +460,68 @@ final class Show {
                     if self.lastTarget >= 0 { self.overlay.order(.above, relativeTo: self.lastTarget) }
                 }
             }
-            self?.follow()
-        }
+            self?.refreshTracking()
+        })
     }
     var lastOtherActivation = Date.distantPast
 
-    func place(_ t: TargetWindow) {
-        if t.cocoaFrame != lastFrame {
-            overlay.setFrame(t.cocoaFrame, display: true)
-            subWin.setFrame(t.cocoaFrame, display: true)
-            let f = t.cocoaFrame
-            skipWin.setFrameOrigin(NSPoint(x: f.maxX - 72 - 18, y: f.maxY - 28 - 44))
-            lastFrame = f
+    private func scheduleFollow(every interval: TimeInterval) {
+        if let tick, tick.isValid, tick.timeInterval == interval { return }
+        tick?.invalidate()
+        // 固定节拍，避免把每次查询耗时额外加到下一帧的等待时间。
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.refreshTracking()
         }
+        timer.tolerance = interval >= 0.1 ? interval / 10 : 0
+        tick = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func refreshTracking() {
+        guard !sleeping, phase != .done else { return }
+        let interval = follow()
+        if phase != .done { scheduleFollow(every: interval) }
+    }
+
+    func place(_ t: TargetWindow) {
+        let frame = t.cocoaFrame
+        guard frame != lastFrame else { return }
+        if overlay.frame.size != frame.size {
+            overlay.setFrame(frame, display: true)
+            if subWin.parent === overlay { subWin.setFrame(frame, display: true) }
+            if skipWin.parent === overlay {
+                skipWin.setFrameOrigin(NSPoint(x: frame.maxX - 90, y: frame.maxY - 72))
+            }
+        } else if overlay.frame.origin != frame.origin {
+            // 子窗口会随父窗口一起移动。
+            overlay.setFrameOrigin(frame.origin)
+        }
+        lastFrame = frame
     }
 
     /// 跟着 ChatGPT 窗口移动/缩放，并保持正好压在它上面（不会盖到别的 App 的窗口）
-    func follow() {
-        guard phase != .done else { return }
-        guard let t = findTargetWindow(pid: pid) else {
+    private func follow() -> TimeInterval {
+        guard let t = findTargetWindow(pid: pid, overlayNumber: overlay.windowNumber) else {
             if overlay.isVisible { overlay.orderOut(nil) }
             sysAnim = true; stableSince = Date()   // 再出现时多半是从 Dock 还原的动画，等停稳再露面
             if NSRunningApplication(processIdentifier: pid) == nil { finish(fast: true) }
-            return
+            return 0.1   // 最小化期间查窗口列表很便宜，0.1 秒一查，还原时背景能马上回来
         }
-        // 位置大小变了、鼠标却没按着 = 系统在做动画（最小化、还原、缩放、分屏）。
-        // 最小化的神灯效果会把窗口拧成漏斗形，矩形视频怎么跟都对不上，干脆先藏起来；
-        // 用户自己拖动、拉伸窗口时鼠标是按着的，照常跟随
+        let now = ProcessInfo.processInfo.systemUptime
+        let frameChanged = t.cocoaFrame != lastFrame
         let mouseDown = NSEvent.pressedMouseButtons & 1 != 0
-        if t.cocoaFrame != lastFrame {
-            if !mouseDown && !sysAnim && overlay.isVisible { log("窗口在做系统动画，浮层先藏起来"); sysAnim = true }
+        if mouseDown && (frameChanged || now <= dragTrackingUntil) {
+            dragTrackingUntil = now + Self.dragReleaseGrace
+        }
+        let trackingDrag = now <= dragTrackingUntil
+        if frameChanged {
+            // 最小化、分屏等系统动画期间先隐藏浮层，拖动结束的最后几帧继续跟随。
+            if !trackingDrag && !sysAnim && overlay.isVisible { log("窗口在做系统动画，浮层先藏起来"); sysAnim = true }
             if sysAnim { stableSince = Date(); lastFrame = t.cocoaFrame }
         }
         if sysAnim {
             if overlay.isVisible { overlay.orderOut(nil) }
-            if Date().timeIntervalSince(stableSince) < 0.18 { return }   // 停稳 0.18 秒再回来
+            if Date().timeIntervalSince(stableSince) < 0.18 { return 0.1 }   // 停稳 0.18 秒再回来
             sysAnim = false
             lastFrame = .zero   // 让 place 一定按最新位置重设一次
             log("窗口停稳，浮层回来")
@@ -484,13 +536,21 @@ final class Show {
         let otherJustActivated = frontPID != pid && Date().timeIntervalSince(lastOtherActivation) < 0.3
         let level: NSWindow.Level = !t.coveredByOtherApp && !otherJustActivated ? .floating : .normal
         // 先把层级定好再显示，直接排到最终位置，不经过「先到最前面、再退回 ChatGPT 上方」的中间状态
-        if overlay.level != level {
+        let levelChanged = overlay.level != level
+        if levelChanged {
             for w in [overlay, subWin, skipWin] { w.level = level }
         }
         let wasVisible = overlay.isVisible
-        if level == .normal { overlay.order(.above, relativeTo: t.number) }
-        else if !wasVisible { overlay.orderFront(nil) }
+        if level == .normal {
+            if !wasVisible || levelChanged || t.overlayNeedsOrdering {
+                overlay.order(.above, relativeTo: t.number)
+            }
+        } else if !wasVisible { overlay.orderFront(nil) }
         if t.number != lastTarget { lastTarget = t.number; log("跟随窗口 \(t.number)") }
+        if t.fullyCovered { return 0.5 }
+        guard trackingDrag else { return 0.1 }
+        let refreshRate = overlay.screen?.maximumFramesPerSecond ?? 60
+        return 1.0 / Double(min(120, max(60, refreshRate)))
     }
 
     /// 点「跳过」：跳过开屏。开着循环背景就直接跳到循环段并透出界面，否则整个关掉
@@ -555,6 +615,7 @@ final class Show {
     func reveal(quick: Bool = false) {
         guard phase == .intro else { return }
         phase = .revealed
+        item.remove(videoOut)   // 循环背景用不到「跳过」时的截图
         overlay.ignoresMouseEvents = true   // 透出后点击直接落到 ChatGPT 上
         playerView.layer?.backgroundColor = NSColor.clear.cgColor   // 万一视频层某帧没画出来，露出的是 ChatGPT 而不是黑块
         overlay.removeChildWindow(skipWin); skipWin.orderOut(nil)   // 进入循环背景后不再显示「跳过」
@@ -568,6 +629,14 @@ final class Show {
             overlay.animator().alphaValue = config.residualAlpha
         }
         // 开屏音效（冲击声、闪光）照常放完，等进入循环文件再换音量
+    }
+
+    /// 暂停 / 继续循环背景。只在循环背景阶段有用；开屏还在放时不让暂停
+    func setPaused(_ p: Bool) {
+        guard phase == .revealed, p != paused else { return }
+        paused = p
+        if p { player.pause() } else { player.play() }
+        log(p ? "暂停循环背景" : "继续播放循环背景")
     }
 
     /// 菜单里拖滑块时实时生效
@@ -609,16 +678,18 @@ final class Show {
         guard phase != .done else { return }
         phase = .done
         tick?.invalidate(); rampTimer?.invalidate()
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
         if let o = timeObserver { player.removeTimeObserver(o) }
         if let o = volObserver { player.removeTimeObserver(o) }
         if let o = subObserver { player.removeTimeObserver(o) }
         if let o = endObserver { NotificationCenter.default.removeObserver(o) }
-        if let o = activateObs { NSWorkspace.shared.notificationCenter.removeObserver(o) }
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspaceObservers.forEach { workspace.removeObserver($0) }
         player.pause(); player.replaceCurrentItem(with: nil)
         overlay.removeChildWindow(skipWin); overlay.removeChildWindow(subWin)
         skipWin.orderOut(nil); subWin.orderOut(nil); overlay.orderOut(nil)
         log("播放结束")
-        onDone()
+        onDone(self)
     }
 }
 
@@ -711,30 +782,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
     var introItem: NSMenuItem!
     var loopItem: NSMenuItem!
-    var stopItem: NSMenuItem!
+    var loopNowItem: NSMenuItem!   // 开着背景时是「关掉循环背景」，没开时是「开启循环背景」
+    var pauseItem: NSMenuItem!
     var alphaRow: SliderRow!
     var introVolRow: SliderRow!
     var show: Show?
     var waiting: Timer?
     var settings: SettingsWindow?
-    var cache: TimelineCache?
-    /// 只拼这次要放的那一条（开屏+循环 或 只循环），另一条用到时再现场拼短的
-    func ensureCache(withIntro: Bool) -> TimelineCache {
-        if let c = cache { return c }
-        let args = CommandLine.arguments   // 测试用：--repeats N 缩短时间线
-        let reps = args.firstIndex(of: "--repeats").flatMap { i in i + 1 < args.count ? Int(args[i + 1]) : nil } ?? 5000
-        let c = TimelineCache(introURL: introURL, loopURL: loopURL, repeats: reps, variants: [withIntro])
-        cache = c; log("开始在后台准备视频")
-        return c
-    }
     var targetRunning: Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: targetBundleID).isEmpty }
-    /// 没在播（播完、跳过关掉、或目标应用已关）→ 放掉视频时间线，不占内存
-    func releaseIfIdle() {
-        guard show == nil, waiting == nil || waiting?.isValid == false, cache != nil else { return }
-        cache = nil; log("没在播放，释放视频")
-        // 拼时间线用掉的几百 MB 释放后，分配器默认先攒着；1 秒后（播放器收尾完）主动还给系统
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { malloc_zone_pressure_relief(nil, 0) }
-    }
     /// 菜单栏图标只在目标应用开着时出现
     func syncIcon() {
         let v = targetRunning || show != nil
@@ -774,17 +829,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: args[i + 2]))
             exit(0)
         }
-        if CommandLine.arguments.contains("--wait-cache") {
-            // 测试用：等后台时间线拼好再开始，量出跟点菜单一样的响应速度
-            _ = ensureCache(withIntro: !loopOnlyPreview)
-            Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] t in
-                guard let self, self.cache?.isReady == true else { return }
-                t.invalidate()
-                if !self.startOnCurrentWindow(withIntro: !self.loopOnlyPreview, exitWhenDone: true) { exit(1) }
-            }
-            return
-        }
-        if previewOnly || loopOnlyPreview {
+        if previewOnly || loopOnlyPreview || CommandLine.arguments.contains("--wait-cache") {
             log(loopOnlyPreview ? "预览模式（只循环背景）" : "预览模式")
             guard startOnCurrentWindow(withIntro: !loopOnlyPreview, exitWhenDone: true) else {
                 log("没找到正在运行的 ChatGPT 窗口"); exit(1)
@@ -831,6 +876,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.isVisible = targetRunning
         statusItem.button?.image = NSImage(systemSymbolName: "moon.stars", accessibilityDescription: "GPT 开机动画")   // 不用 ✨，和 Claude 版区分开
         let m = NSMenu(); m.delegate = self
+        m.autoenablesItems = false   // 「暂停」在没开背景时要变灰，由 refreshMenu 自己定
 
         let h1 = NSMenuItem(title: "打开 ChatGPT 时", action: nil, keyEquivalent: ""); h1.isEnabled = false
         m.addItem(h1)
@@ -849,8 +895,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let h2 = NSMenuItem(title: "现在，在 ChatGPT 窗口上", action: nil, keyEquivalent: ""); h2.isEnabled = false
         m.addItem(h2)
         item("播放一次开屏动画", #selector(previewIntro), m)
-        item("开启循环背景", #selector(previewLoop), m)
-        stopItem = item("关掉动画 / 背景", #selector(stopShow), m)
+        loopNowItem = item("开启循环背景", #selector(toggleLoopNow), m)
+        pauseItem = item("暂停循环背景", #selector(togglePause), m)
         m.addItem(.separator())
         item("设置窗口…", #selector(openSettings), m)
         item("打开设置文件…", #selector(openConfig), m)
@@ -879,7 +925,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings?.refresh()
         introItem.state = config.playIntro ? .on : .off
         loopItem.state = config.loopBackground ? .on : .off
-        stopItem.isEnabled = show != nil
+        // 正在放（开屏或循环背景）就显示「关掉…」，没在放就显示「开启循环背景」
+        let s = show.flatMap { $0.phase == .intro || $0.phase == .revealed ? $0 : nil }
+        loopNowItem.title = s == nil ? "开启循环背景" : (s!.phase == .intro ? "关掉开屏动画" : "关掉循环背景")
+        pauseItem.title = s?.paused == true ? "继续播放循环背景" : "暂停循环背景"
+        pauseItem.isEnabled = s?.phase == .revealed
         alphaRow.slider.doubleValue = config.residualAlpha; alphaRow.refreshLabel()
         introVolRow.slider.doubleValue = config.introVolume; introVolRow.refreshLabel()
     }
@@ -893,6 +943,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func previewIntro() { show?.teardown(); _ = startOnCurrentWindow(withIntro: true, exitWhenDone: false) }
     @objc func previewLoop() { show?.teardown(); _ = startOnCurrentWindow(withIntro: false, exitWhenDone: false) }
     @objc func stopShow() { show?.finish(fast: true) }
+    @objc func toggleLoopNow() {
+        if let s = show, s.phase == .intro || s.phase == .revealed { s.finish(fast: true) } else { previewLoop() }
+    }
+    @objc func togglePause() { guard let s = show else { return }; s.setPaused(!s.paused) }
     @objc func openConfig() { NSWorkspace.shared.open(Config.file) }
 
     /// 彻底卸载：删登录项、小程序、设置、日志，然后退出。ChatGPT.app 从来没被改过，不用还原。
@@ -951,16 +1005,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard config.playIntro || config.loopBackground else { return }
         show?.teardown()
         let withIntro = config.playIntro
-        _ = ensureCache(withIntro: withIntro)   // 趁等窗口的这几秒在后台拼
         // 等主窗口出现，最多 30 秒
         let pid = app.processIdentifier, deadline = Date().addingTimeInterval(30)
         waiting?.invalidate()
-        waiting = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] timer in
+        waiting = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] timer in
             guard let self else { timer.invalidate(); return }
             if let t = findTargetWindow(pid: pid) {
-                timer.invalidate(); self.start(pid: pid, target: t, withIntro: withIntro, exitWhenDone: false)
+                timer.invalidate()
+                self.waiting = nil
+                self.start(pid: pid, target: t, withIntro: withIntro, exitWhenDone: false)
             } else if Date() > deadline || app.isTerminated {
-                timer.invalidate(); self.releaseIfIdle(); log("等不到 ChatGPT 主窗口，放弃这次")
+                timer.invalidate()
+                self.waiting = nil
+                log("等不到 ChatGPT 主窗口，放弃这次")
             }
         }
     }
@@ -971,18 +1028,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self, !self.targetRunning else { return }
             self.waiting?.invalidate()
+            self.waiting = nil
             self.show?.teardown()
-            self.syncIcon(); self.releaseIfIdle()
+            self.syncIcon()
         }
     }
 
     func start(pid: pid_t, target: TargetWindow, withIntro: Bool, exitWhenDone: Bool) {
-        var s: Show!
         let t0 = Date()
-        s = Show(pid: pid, target: target, config: config, withIntro: withIntro,
-                 timeline: ensureCache(withIntro: withIntro).get(withIntro: withIntro)) { [weak self] in
-            if self?.show === s { self?.show = nil }
-            self?.refreshMenu(); self?.syncIcon(); self?.releaseIfIdle()
+        let args = CommandLine.arguments
+        let testRepeats = args.firstIndex(of: "--repeats").flatMap { i in i + 1 < args.count ? Int(args[i + 1]) : nil }
+        let repeats = min(120, max(1, testRepeats ?? 120))
+        let timeline = buildTimeline(intro: withIntro ? introURL : nil, loop: loopURL, repeats: repeats)
+        let s = Show(pid: pid, target: target, config: config, withIntro: withIntro, timeline: timeline) { [weak self] finished in
+            if self?.show === finished { self?.show = nil }
+            if self?.statusItem != nil { self?.refreshMenu(); self?.syncIcon() }
             if exitWhenDone { DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exit(0) } }
         }
         show = s

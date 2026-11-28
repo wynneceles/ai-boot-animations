@@ -1,0 +1,241 @@
+# DeepSeek（DeepSeek Harness）开机动画 Windows 版自动编译 + 自测：编译、离屏渲染字幕、对着记事本窗口播放并截图
+name: windows-deepseek-test
+on:
+  push:
+    branches: [windows-deepseek]
+    paths: ['deepseek/windows/**', '.github/workflows/windows-deepseek.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: 视频转 H.264
+        run: |
+          choco install ffmpeg -y --no-progress | Out-Null
+          $env:Path += ";C:\ProgramData\chocolatey\bin"
+          ffmpeg -v error -y -i deepseek\assets\intro.mp4 -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -c:a copy deepseek\windows\assets\intro.mp4
+          ffmpeg -v error -y -i deepseek\assets\loop.mp4 -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -an deepseek\windows\assets\loop.mp4
+          ffmpeg -v error -y -stream_loop 1 -i deepseek\assets\loop.mp4 -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -an deepseek\windows\assets\loop-x2.mp4
+          Get-ChildItem deepseek\windows\assets
+      - name: 媒体组件（服务器版 Windows 默认没装）
+        continue-on-error: true
+        run: |
+          Install-WindowsFeature Server-Media-Foundation | Format-List
+      - name: 编译
+        run: powershell -ExecutionPolicy Bypass -File deepseek\windows\build.ps1 -Out "$pwd\build"
+      - name: 安装位置测试（装到非系统盘；老版本在 C 盘的要被清掉；卸载要删干净）
+        run: |
+          Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Format-Table DeviceID, @{n='FreeGB';e={[int]($_.FreeSpace/1GB)}}
+          $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          if (-not (Test-Path $run)) { New-Item -Path $run -Force | Out-Null }
+          # 假装装过老版本：C 盘老位置放个 exe，开机自启指向它
+          $oldDir = "$env:LOCALAPPDATA\Programs\DeepSeekBootAnimation"
+          New-Item -ItemType Directory -Force $oldDir | Out-Null; Set-Content "$oldDir\DeepSeekBootAnimation.exe" 'old'
+          Set-ItemProperty $run -Name DeepSeekBootAnimation -Value "`"$oldDir\DeepSeekBootAnimation.exe`""
+          powershell -ExecutionPolicy Bypass -File deepseek\windows\install.ps1
+          Start-Sleep 3
+          Get-Process DeepSeekBootAnimation -ErrorAction SilentlyContinue | Stop-Process -Force
+          $reg = (Get-ItemProperty $run -Name DeepSeekBootAnimation).DeepSeekBootAnimation
+          Write-Host "Run key: $reg"
+          $exe = $reg.Trim('"'); $dir = Split-Path $exe -Parent
+          if (-not (Test-Path $exe)) { throw "install: exe missing" }
+          if ($exe.StartsWith($env:SystemDrive, [StringComparison]::OrdinalIgnoreCase)) { throw "install: landed on system drive: $exe" }
+          if (Test-Path $oldDir) { throw "install: old C: copy still there: $oldDir" }
+          # 再装一次：这回假装旧版在用户自己挑的文件夹里，旁边还有别的文件——只许删我们的文件
+          Get-Process DeepSeekBootAnimation -ErrorAction SilentlyContinue | Stop-Process -Force
+          $mine = "$env:TEMP\MyApps"
+          New-Item -ItemType Directory -Force "$mine\assets" | Out-Null; Set-Content "$mine\DeepSeekBootAnimation.exe" 'old'; Set-Content "$mine\keep.txt" 'user file'
+          Set-ItemProperty $run -Name DeepSeekBootAnimation -Value "`"$mine\DeepSeekBootAnimation.exe`""
+          powershell -ExecutionPolicy Bypass -File deepseek\windows\install.ps1
+          Start-Sleep 3
+          Get-Process DeepSeekBootAnimation -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (-not (Test-Path "$mine\keep.txt")) { throw "install: deleted user's file in custom folder" }
+          if (Test-Path "$mine\DeepSeekBootAnimation.exe") { throw "install: old exe in custom folder not removed" }
+          $exe = ((Get-ItemProperty $run -Name DeepSeekBootAnimation).DeepSeekBootAnimation).Trim('"'); $dir = Split-Path $exe -Parent
+          powershell -ExecutionPolicy Bypass -File "$dir\uninstall.ps1"
+          Start-Sleep 5
+          if (Test-Path $dir) { throw "uninstall: folder still there: $dir" }
+          if (Get-ItemProperty $run -Name DeepSeekBootAnimation -ErrorAction SilentlyContinue) { throw "uninstall: Run key still there" }
+          Write-Host "install/uninstall OK: $dir (old C: copy removed)"
+      - name: 准备输出目录
+        run: New-Item -ItemType Directory -Force out | Out-Null
+      - name: 对着记事本播放开屏（完整）
+        run: |
+          $np = Start-Process notepad -WindowStyle Maximized -PassThru
+          Start-Sleep 3
+          $app = Start-Process build\DeepSeekBootAnimation.exe -PassThru -ArgumentList "--target-title Notepad --play intro --exit-after 20 --shot-at 1,2,5,9,11,12,14,17 --shot-dir `"$pwd\out\intro`"" 
+          $app | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
+          Stop-Process $np -Force
+      - name: 跳过开屏
+        run: |
+          $np = Start-Process notepad -WindowStyle Maximized -PassThru
+          Start-Sleep 3
+          $app = Start-Process build\DeepSeekBootAnimation.exe -PassThru -ArgumentList "--target-title Notepad --play intro --test-skip 3 --exit-after 8 --shot-at 2.5,3.4,4.5,7 --shot-dir `"$pwd\out\skip`"" 
+          $app | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
+          Stop-Process $np -Force
+      - name: 只开循环背景（检查：浮层确实是分层窗口、点击能穿透到下面的窗口）
+        run: |
+          $log = "$env:LOCALAPPDATA\DeepSeekBootAnimation\log.txt"
+          $before = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue).Count
+          $np = Start-Process notepad -WindowStyle Maximized -PassThru
+          Start-Sleep 3
+          $app = Start-Process build\DeepSeekBootAnimation.exe -PassThru -ArgumentList "--target-title Notepad --play loop --exit-after 14 --shot-at 2,6,12 --shot-dir `"$pwd\out\loop`"" 
+          $app | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
+          Stop-Process $np -Force
+          $new = @(@(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue) | Select-Object -Skip $before)
+          $new | ForEach-Object { Write-Host $_ }
+          if (-not ($new | Where-Object { $_.Contains('layered=1') })) { throw "overlay is not a layered window" }
+          $hits = @($new | Where-Object { $_.Contains(' hit=') })
+          if ($hits.Count -eq 0) { throw "no snapshot hit-test lines" }
+          if ($hits | Where-Object { -not $_.Contains('hit=target') }) { throw "click does not pass through to the target window" }
+      - name: 循环背景卡住后自愈（每 0.8 秒强制接缝，每 10 秒故意卡一次）
+        run: |
+          $log = "$env:LOCALAPPDATA\DeepSeekBootAnimation\log.txt"
+          $before = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue).Count
+          $np = Start-Process notepad -WindowStyle Maximized -PassThru
+          Start-Sleep 3
+          $app = Start-Process build\DeepSeekBootAnimation.exe -PassThru -ArgumentList "--target-title Notepad --play loop --exit-after 32 --legacy-loop --loop-cut 0.8 --stall-test 10 --recycle-every 5 --heartbeat 4 --shot-at 9,16,30 --shot-dir `"$pwd\out\selfheal`""
+          $app | Wait-Process -Timeout 90 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
+          Stop-Process $np -Force
+          $new = @(@(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue) | Select-Object -Skip $before)
+          $new | ForEach-Object { Write-Host $_ }
+          # 日志里的中文用码位拼，免得脚本编码出岔子：「自动恢复（」「恢复成功」
+          $recover = [string]::Concat([char[]](0x81EA,0x52A8,0x6062,0x590D,0xFF08))
+          $healed = [string]::Concat([char[]](0x6062,0x590D,0x6210,0x529F))
+          if (-not ($new | Where-Object { $_.Contains($recover) })) { throw "self-heal test: no recovery in log" }
+          if (-not ($new | Where-Object { $_.Contains($healed) })) { throw "self-heal test: loop did not move again after recovery" }
+      - name: 待命播放器换失败不影响画面（#7：每换 2 次故意失败 1 次，不许触发重建）
+        run: |
+          $log = "$env:LOCALAPPDATA\DeepSeekBootAnimation\log.txt"
+          $before = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue).Count
+          $np = Start-Process notepad -WindowStyle Maximized -PassThru
+          Start-Sleep 3
+          $app = Start-Process build\DeepSeekBootAnimation.exe -PassThru -ArgumentList "--target-title Notepad --play loop --exit-after 30 --legacy-loop --loop-cut 0.8 --recycle-every 2 --standby-fail-test 2 --heartbeat 4"
+          $app | Wait-Process -Timeout 90 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
+          Stop-Process $np -Force
+          $new = @(@(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue) | Select-Object -Skip $before)
+          $new | ForEach-Object { Write-Host $_ }
+          # 「没换成」「自动恢复（」「运行中」
+          $failed = [string]::Concat([char[]](0x6CA1,0x6362,0x6210))
+          $recover = [string]::Concat([char[]](0x81EA,0x52A8,0x6062,0x590D,0xFF08))
+          $beat = [string]::Concat([char[]](0x8FD0,0x884C,0x4E2D))
+          $fails = @($new | Where-Object { $_.Contains($failed) })
+          if ($fails.Count -lt 2) { throw "standby-fail test: injected failures not seen ($($fails.Count))" }
+          if ($new | Where-Object { $_.Contains($recover) }) { throw "standby-fail test: a standby failure still triggered a full rebuild" }
+          $beats = @($new | Where-Object { $_.Contains($beat) })
+          if ($beats.Count -lt 2) { throw "standby-fail test: no heartbeat lines" }
+          $laps = [int]([regex]::Match($beats[-1].Substring($beats[-1].IndexOf($beat)), '\d+').Value)
+          Write-Host "laps at last heartbeat: $laps"
+          if ($laps -lt 10) { throw "standby-fail test: loop stopped advancing (laps=$laps)" }
+      - name: 闪屏检测（录屏逐帧看亮度突变：老办法接缝 / 重叠交接 / 开屏接循环 / 卡住重建）
+        run: |
+          $env:Path += ";C:\ProgramData\chocolatey\bin"
+          $cfgDir = "$env:APPDATA\DeepSeekBootAnimation"
+          New-Item -ItemType Directory -Force $cfgDir, out\seam | Out-Null
+          $cfgBak = "$cfgDir\config.json.bak"
+          if (Test-Path "$cfgDir\config.json") { Copy-Item "$cfgDir\config.json" $cfgBak -Force }
+          # 背景调成完全不透明：漏一帧就会露出记事本的白底，亮度一下跳很多
+          Set-Content "$cfgDir\config.json" '{ "residualAlpha" : 1.0 }' -Encoding UTF8
+          # mode = name, play, extra args, wait before recording, record seconds
+          $modes = @(
+            @('legacy',  'loop',  ' --legacy-loop', 4, 26),
+            @('overlap', 'loop',  ' --recycle-every 2', 4, 26),
+            @('intro',   'intro', '', 6, 14),
+            @('rebuild', 'loop',  ' --stall-test 9', 4, 26)
+          )
+          foreach ($m in $modes) {
+            $mode = $m[0]
+            $np = Start-Process notepad -WindowStyle Maximized -PassThru
+            Start-Sleep 3
+            $exitAfter = $m[3] + $m[4] + 4
+            $app = Start-Process build\DeepSeekBootAnimation.exe -PassThru -ArgumentList ("--target-title Notepad --play " + $m[1] + " --exit-after " + $exitAfter + $m[2])
+            Start-Sleep $m[3]
+            $rec = Start-Process ffmpeg -PassThru -NoNewWindow -ArgumentList "-v error -y -f gdigrab -framerate 60 -t $($m[4]) -i desktop -vf scale=320:-1 -c:v libx264 -preset ultrafast -crf 18 out\seam\$mode.mp4"
+            $rec | Wait-Process -Timeout 90 -ErrorAction SilentlyContinue
+            $app | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
+            Stop-Process $np -Force -ErrorAction SilentlyContinue
+            ffmpeg -v error -i out\seam\$mode.mp4 -vf "signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=out/seam/$mode-yavg.txt" -f null -
+            $t = $null; $prev = $null; $rows = @()
+            foreach ($line in Get-Content "out\seam\$mode-yavg.txt") {
+              if ($line -match 'pts_time:([0-9.]+)') { $t = [double]$matches[1] }
+              elseif ($line -match 'YAVG=([0-9.]+)') {
+                $y = [double]$matches[1]
+                if ($prev -ne $null -and [Math]::Abs($y - $prev) -gt 3) { $rows += ('t={0:N3}s  {1:N1} -> {2:N1}' -f $t, $prev, $y) }
+                $prev = $y
+              }
+            }
+            # 字符串里别写中文：Windows PowerShell 5.1 按 ANSI 读脚本，中文会把引号吃掉
+            "[$mode] frames with brightness jump > 3: $($rows.Count)" | Tee-Object -Append out\seam\summary.txt
+            $rows | Select-Object -First 40 | Tee-Object -Append out\seam\summary.txt
+            Remove-Item out\seam\$mode.mp4 -ErrorAction SilentlyContinue   # 录屏不推到仓库，只留数据
+          }
+          if (Test-Path $cfgBak) { Move-Item $cfgBak "$cfgDir\config.json" -Force } else { Remove-Item "$cfgDir\config.json" -ErrorAction SilentlyContinue }
+      - name: 性能对比（老的逐像素透明 / 新的外壳窗口 / 完全不透明的下限；云端没有显卡、是软件渲染，CPU 只能看相对差别；截图亮度要对得上）
+        run: |
+          $log = "$env:LOCALAPPDATA\DeepSeekBootAnimation\log.txt"
+          New-Item -ItemType Directory -Force out\perf | Out-Null
+          # 「性能：」用码位拼，免得脚本编码出岔子
+          $tag = [string]::Concat([char[]](0x6027,0x80FD,0xFF1A))
+          Add-Type -AssemblyName System.Drawing
+          function MeanY($path) {
+            $img = [Drawing.Bitmap]::FromFile($path); $sum = 0; $n = 0
+            for ($y = 0; $y -lt $img.Height; $y += 8) { for ($x = 0; $x -lt $img.Width; $x += 8) { $c = $img.GetPixel($x, $y); $sum += 0.299 * $c.R + 0.587 * $c.G + 0.114 * $c.B; $n++ } }
+            $img.Dispose(); return $sum / $n
+          }
+          $bright = @{}
+          foreach ($mode in @('perpixel', 'hosted', 'opaque')) {
+            $before = @(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue).Count
+            $np = Start-Process notepad -WindowStyle Maximized -PassThru
+            Start-Sleep 3
+            $app = Start-Process build\DeepSeekBootAnimation.exe -PassThru -ArgumentList "--target-title Notepad --play loop --exit-after 50 --perf-log 10 --overlay-mode $mode --shot-at 20 --shot-dir `"$pwd\out\perf\$mode`""
+            $app | Wait-Process -Timeout 90 -ErrorAction SilentlyContinue; $app | Stop-Process -Force -ErrorAction SilentlyContinue
+            Stop-Process $np -Force -ErrorAction SilentlyContinue
+            $new = @(@(Get-Content $log -Encoding UTF8 -ErrorAction SilentlyContinue) | Select-Object -Skip $before)
+            "[$mode]" | Tee-Object -Append out\perf\summary.txt
+            $new | Where-Object { $_.Contains($tag) } | Tee-Object -Append out\perf\summary.txt
+            $shot = Get-ChildItem "out\perf\$mode" -Filter *.png -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($shot) { $bright[$mode] = MeanY $shot.FullName; ("[$mode] screenshot mean brightness {0:N1}" -f $bright[$mode]) | Tee-Object -Append out\perf\summary.txt }
+          }
+          # 新浮层在默认 25% 透明度下，看上去要和老浮层一样（差太多说明透明没生效，比如整块不透明）
+          if (-not $bright.ContainsKey('perpixel') -or -not $bright.ContainsKey('hosted')) { throw "missing perf screenshots" }
+          $d = [Math]::Abs($bright['hosted'] - $bright['perpixel'])
+          ("hosted vs perpixel brightness diff {0:N1}" -f $d) | Tee-Object -Append out\perf\summary.txt
+          if ($d -gt 12) { throw "hosted overlay does not look like the per-pixel one (alpha not applied?)" }
+      - name: 收集日志
+        if: always()
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item "$env:LOCALAPPDATA\DeepSeekBootAnimation\log.txt" out\ -ErrorAction SilentlyContinue
+          Get-Content out\log.txt -ErrorAction SilentlyContinue
+      - name: 截图压成小 JPG，推到 ci-results 分支
+        if: always()
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $codec = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+          $ep = New-Object Drawing.Imaging.EncoderParameters 1
+          $ep.Param[0] = New-Object Drawing.Imaging.EncoderParameter ([Drawing.Imaging.Encoder]::Quality), 70L
+          Get-ChildItem out -Recurse -Filter *.png | ForEach-Object {
+            $img = [Drawing.Image]::FromFile($_.FullName)
+            $w = [Math]::Min(960, $img.Width); $h = [int]($img.Height * $w / $img.Width)
+            $bmp = New-Object Drawing.Bitmap $img, $w, $h
+            $bmp.Save(($_.FullName -replace '\.png$', '.jpg'), $codec, $ep)
+            $bmp.Dispose(); $img.Dispose(); Remove-Item $_.FullName
+          }
+          $dir = "ci-results/deepseek-${{ github.run_number }}"
+          git config user.name "ci"; git config user.email "ci@users.noreply.github.com"
+          $ErrorActionPreference = "Continue"
+          git fetch -q origin ci-results
+          if ($LASTEXITCODE -eq 0) { git checkout -q -B ci-results origin/ci-results } else { git checkout -q --orphan ci-results; git rm -rq --cached . 2>$null }
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item out\* $dir -Recurse -Force
+          git add $dir
+          git commit -q -m "CI deepseek-${{ github.run_number }}"
+          git push -q origin ci-results
+          Write-Host "results: $dir"
