@@ -145,49 +145,53 @@ func findTargetWindow(pid: pid_t) -> TargetWindow? {
 
 struct Timeline { let asset: AVAsset; let loopStart: CMTime }
 
-func buildTimeline(intro: URL?, loop: URL, repeats: Int = 5000) -> Timeline {   // 5000 段 ≈ 8 小时
+func buildTimeline(intro: URL?, loop: URL, repeats: Int = 1000) -> Timeline {   // 1000 段 ≈ 2 小时，复用单个 AVURLAsset 毫秒级完成
     let comp = AVMutableComposition()
     let vT = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
     let aT = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
     var cursor = CMTime.zero
 
-    func append(_ url: URL) {
-        let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
-        guard let sv = asset.tracks(withMediaType: .video).first else { return }
+    func appendTrack(video sv: AVAssetTrack, audio sa: AVAssetTrack?, count: Int) {
         let vDur = sv.timeRange.duration
-        try? vT.insertTimeRange(CMTimeRange(start: sv.timeRange.start, duration: vDur), of: sv, at: cursor)
+        let vRange = CMTimeRange(start: sv.timeRange.start, duration: vDur)
         if vT.preferredTransform != sv.preferredTransform { vT.preferredTransform = sv.preferredTransform }
-        if let sa = asset.tracks(withMediaType: .audio).first {
-            let aDur = CMTimeMinimum(sa.timeRange.duration, vDur)
-            try? aT.insertTimeRange(CMTimeRange(start: sa.timeRange.start, duration: aDur), of: sa, at: cursor)
+        let aRange: CMTimeRange? = sa.map { CMTimeRange(start: $0.timeRange.start, duration: CMTimeMinimum($0.timeRange.duration, vDur)) }
+        for _ in 0..<count {
+            try? vT.insertTimeRange(vRange, of: sv, at: cursor)
+            if let sa, let aRange {
+                try? aT.insertTimeRange(aRange, of: sa, at: cursor)
+            }
+            cursor = cursor + vDur
         }
-        cursor = cursor + vDur
     }
 
-    if let intro { append(intro) }
+    if let intro {
+        let asset = AVURLAsset(url: intro, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        if let sv = asset.tracks(withMediaType: .video).first {
+            appendTrack(video: sv, audio: asset.tracks(withMediaType: .audio).first, count: 1)
+        }
+    }
     let loopStart = cursor
-    for _ in 0..<repeats { append(loop) }
+    let loopAsset = AVURLAsset(url: loop, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+    if let sv = loopAsset.tracks(withMediaType: .video).first {
+        appendTrack(video: sv, audio: loopAsset.tracks(withMediaType: .audio).first, count: repeats)
+    }
     return Timeline(asset: comp.copy() as! AVComposition, loopStart: loopStart)
 }
 
-/// 8 小时的时间线拼起来要好几秒，所以目标应用一启动就在后台拼（应用没开时不拼、不占内存，关掉后就释放）。
-/// 先拼一条短的（300 段，不到 1 秒）应急，再拼长的；放到头照样跳回循环开头继续。
+/// 目标应用一启动就在后台拼时间线（复用单个 AVURLAsset，几毫秒完成，几乎不占内存）。
 final class TimelineCache {
     let introURL: URL, loopURL: URL, repeats: Int
     private var ready: [Bool: Timeline] = [:]
-    private var short: [Bool: Timeline] = [:]
     init(introURL: URL, loopURL: URL, repeats: Int, variants: [Bool]) {
         self.introURL = introURL; self.loopURL = loopURL; self.repeats = repeats
         for withIntro in variants {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let s = buildTimeline(intro: withIntro ? introURL : nil, loop: loopURL, repeats: min(repeats, 300))
-                DispatchQueue.main.async { self?.short[withIntro] = s }
-                guard self != nil else { return }
                 let t0 = Date()
                 let t = buildTimeline(intro: withIntro ? introURL : nil, loop: loopURL, repeats: repeats)
                 DispatchQueue.main.async {
-                    guard let self else { return }   // 中途已经释放（应用关了）就丢掉
-                    self.ready[withIntro] = t; self.short[withIntro] = nil
+                    guard let self else { return }
+                    self.ready[withIntro] = t
                     log("后台时间线准备好（\(withIntro ? "开屏+循环" : "只循环")，\(repeats) 段，\(Int(Date().timeIntervalSince(t0) * 1000))ms）")
                 }
             }
@@ -196,9 +200,11 @@ final class TimelineCache {
     var isReady: Bool { !ready.isEmpty }
     func get(withIntro: Bool) -> Timeline {
         if let t = ready[withIntro] { return t }
-        if let t = short[withIntro] { log("长时间线还没好，先用短的"); return t }
-        log("后台时间线还没好，现场拼短的顶上")
-        return buildTimeline(intro: withIntro ? introURL : nil, loop: loopURL, repeats: min(repeats, 300))
+        let t0 = Date()
+        let t = buildTimeline(intro: withIntro ? introURL : nil, loop: loopURL, repeats: repeats)
+        ready[withIntro] = t
+        log("现场拼时间线（\(repeats) 段，\(Int(Date().timeIntervalSince(t0) * 1000))ms）")
+        return t
     }
 }
 
@@ -322,7 +328,6 @@ final class Show {
     let player = AVPlayer()
     let timeline: Timeline
     let item: AVPlayerItem
-    let videoOut = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
     var subObserver: Any?
     var currentSub = -1
     var tick: Timer?
@@ -335,6 +340,9 @@ final class Show {
     var endObserver: NSObjectProtocol?
     var lastTarget = -1
     var lastFrame = NSRect.zero
+    var lastCovered = false
+    var idleTickCount = 0
+    var activeTrackingUntil = Date.distantPast
     var sysAnim = false          // 窗口在做系统动画（最小化、还原、缩放、分屏）时浮层先藏起来
     var stableSince = Date()
     private(set) var paused = false   // 菜单「暂停循环背景」：画面停在当前这一帧，背景照样盖着
@@ -344,7 +352,7 @@ final class Show {
         self.pid = pid; self.config = config; self.withIntro = withIntro; self.onDone = onDone
         self.timeline = timeline
         item = AVPlayerItem(asset: timeline.asset)
-        item.add(videoOut)   // 点「跳过」时用来截当前这一帧做淡出
+        player.automaticallyWaitsToMinimizeStalling = false
 
         overlay = makeBorderlessWindow(target.cocoaFrame)
         playerView = PlayerView(frame: NSRect(origin: .zero, size: target.cocoaFrame.size))
@@ -423,7 +431,7 @@ final class Show {
             }
         }
 
-        tick = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.follow() }
+        tick = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.followTick() }
         RunLoop.main.add(tick!, forMode: .common)   // 拖动菜单、窗口时也继续跟随
         activateObs = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] n in
@@ -436,7 +444,8 @@ final class Show {
                     if self.lastTarget >= 0 { self.overlay.order(.above, relativeTo: self.lastTarget) }
                 }
             }
-            self?.follow()
+            self?.activeTrackingUntil = Date().addingTimeInterval(0.5)
+            self?.follow(forceOrder: true)
         }
     }
     var lastOtherActivation = Date.distantPast
@@ -451,8 +460,23 @@ final class Show {
         }
     }
 
+    /// 自适应轮询：拖动鼠标 / 系统动画 / 刚切换应用时保持 60Hz 紧跟，静止时降到 10Hz，大幅降低 WindowServer 争用
+    func followTick() {
+        let mouseDown = NSEvent.pressedMouseButtons & 1 != 0
+        if mouseDown || sysAnim || Date() < activeTrackingUntil {
+            idleTickCount = 0
+            follow()
+            return
+        }
+        idleTickCount += 1
+        if idleTickCount >= 6 {
+            idleTickCount = 0
+            follow()
+        }
+    }
+
     /// 跟着 ChatGPT 窗口移动/缩放，并保持正好压在它上面（不会盖到别的 App 的窗口）
-    func follow() {
+    func follow(forceOrder: Bool = false) {
         guard phase != .done else { return }
         guard let t = findTargetWindow(pid: pid) else {
             if overlay.isVisible { overlay.orderOut(nil) }
@@ -460,11 +484,10 @@ final class Show {
             if NSRunningApplication(processIdentifier: pid) == nil { finish(fast: true) }
             return
         }
-        // 位置大小变了、鼠标却没按着 = 系统在做动画（最小化、还原、缩放、分屏）。
-        // 最小化的神灯效果会把窗口拧成漏斗形，矩形视频怎么跟都对不上，干脆先藏起来；
-        // 用户自己拖动、拉伸窗口时鼠标是按着的，照常跟随
         let mouseDown = NSEvent.pressedMouseButtons & 1 != 0
-        if t.cocoaFrame != lastFrame {
+        let frameChanged = t.cocoaFrame != lastFrame
+        if frameChanged {
+            activeTrackingUntil = Date().addingTimeInterval(0.35)
             if !mouseDown && !sysAnim && overlay.isVisible { log("窗口在做系统动画，浮层先藏起来"); sysAnim = true }
             if sysAnim { stableSince = Date(); lastFrame = t.cocoaFrame }
         }
@@ -477,21 +500,25 @@ final class Show {
         }
         place(t)
         if overlay.isVisible && !overlay.isOnActiveSpace { overlay.orderOut(nil) }   // 目标窗口被挪到别的桌面：重新显示一次，浮层才会跟过去
-        // ChatGPT 窗口没被别的 App 压着（不管 ChatGPT 在不在前台）：浮层放到浮动层级，点 ChatGPT 时它把自己窗口提上来也盖不过浮层
-        //   （以前只在 ChatGPT 在前台时才升，别的 App 最小化后再点 ChatGPT，ChatGPT 会先盖过浮层一两帧，看着就是闪黑）
-        // 被别的 App 压着：降回普通层级，紧贴在 ChatGPT 窗口上方，不会盖住别的 App（这种情况点 ChatGPT 仍可能轻微闪一下：ChatGPT 提窗口比外部程序快，抢不过）
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1
-        // 别的 App 刚到前台的 0.3 秒内先不升（它的窗口可能正要盖上来，窗口列表还没反映）；ChatGPT 自己在前台不受限
         let otherJustActivated = frontPID != pid && Date().timeIntervalSince(lastOtherActivation) < 0.3
         let level: NSWindow.Level = !t.coveredByOtherApp && !otherJustActivated ? .floating : .normal
-        // 先把层级定好再显示，直接排到最终位置，不经过「先到最前面、再退回 ChatGPT 上方」的中间状态
-        if overlay.level != level {
+        let levelChanged = overlay.level != level
+        if levelChanged {
             for w in [overlay, subWin, skipWin] { w.level = level }
         }
         let wasVisible = overlay.isVisible
-        if level == .normal { overlay.order(.above, relativeTo: t.number) }
-        else if !wasVisible { overlay.orderFront(nil) }
-        if t.number != lastTarget { lastTarget = t.number; log("跟随窗口 \(t.number)") }
+        let targetChanged = t.number != lastTarget
+        let coveredChanged = t.coveredByOtherApp != lastCovered
+        lastCovered = t.coveredByOtherApp
+        if level == .normal {
+            if !wasVisible || levelChanged || targetChanged || coveredChanged || forceOrder {
+                overlay.order(.above, relativeTo: t.number)
+            }
+        } else if !wasVisible {
+            overlay.orderFront(nil)
+        }
+        if targetChanged { lastTarget = t.number; log("跟随窗口 \(t.number)") }
     }
 
     /// 点「跳过」：跳过开屏。开着循环背景就直接跳到循环段并透出界面，否则整个关掉
@@ -525,10 +552,11 @@ final class Show {
     }
 
     func currentFrameImage() -> CGImage? {
-        let t = item.currentTime()
-        guard let pb = videoOut.copyPixelBuffer(forItemTime: t, itemTimeForDisplay: nil) else { return nil }
-        let ci = CIImage(cvPixelBuffer: pb)
-        return CIContext(options: nil).createCGImage(ci, from: ci.extent)
+        let gen = AVAssetImageGenerator(asset: timeline.asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.requestedTimeToleranceBefore = CMTime(seconds: 0.05, preferredTimescale: 600)
+        gen.requestedTimeToleranceAfter = CMTime(seconds: 0.05, preferredTimescale: 600)
+        return try? gen.copyCGImage(at: item.currentTime(), actualTime: nil)
     }
 
     // 字幕：按播放时间算透明度，入场、出场按 subtitleFadeSeconds 渐显渐隐（默认 0.5 秒）
@@ -732,7 +760,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func ensureCache(withIntro: Bool) -> TimelineCache {
         if let c = cache { return c }
         let args = CommandLine.arguments   // 测试用：--repeats N 缩短时间线
-        let reps = args.firstIndex(of: "--repeats").flatMap { i in i + 1 < args.count ? Int(args[i + 1]) : nil } ?? 5000
+        let reps = args.firstIndex(of: "--repeats").flatMap { i in i + 1 < args.count ? Int(args[i + 1]) : nil } ?? 1000
         let c = TimelineCache(introURL: introURL, loopURL: loopURL, repeats: reps, variants: [withIntro])
         cache = c; log("开始在后台准备视频")
         return c
