@@ -786,7 +786,8 @@ final class SettingsWindow: NSWindowController {
     let loop = NSButton(checkboxWithTitle: "保留循环背景", target: nil, action: nil)
     var rows: [SliderRow] = []
     weak var app: AppDelegate?
-    var current: Controller? { app.flatMap { $0.controllers[max(0, picker.indexOfSelectedItem)] } }
+    var shown: [Controller] = []   // 下拉框里列出的（这台 Mac 上装了的）应用
+    var current: Controller? { picker.indexOfSelectedItem >= 0 && picker.indexOfSelectedItem < shown.count ? shown[picker.indexOfSelectedItem] : nil }
 
     init(app: AppDelegate) {
         self.app = app
@@ -795,7 +796,7 @@ final class SettingsWindow: NSWindowController {
         w.title = "AI 开机动画"
         w.isReleasedWhenClosed = false
         super.init(window: w)
-        picker.addItems(withTitles: app.controllers.map { $0.p.menuTitle })
+        reloadPicker()
         picker.target = self; picker.action = #selector(picked)
         intro.target = self; intro.action = #selector(toggled)
         loop.target = self; loop.action = #selector(toggled)
@@ -821,8 +822,16 @@ final class SettingsWindow: NSWindowController {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    func reloadPicker() {
+        let keep = current
+        shown = app?.controllers.filter { $0.installed } ?? []
+        if shown.isEmpty { shown = app?.controllers ?? [] }   // 一个都没装：全列出来，至少能看设置
+        picker.removeAllItems()
+        picker.addItems(withTitles: shown.map { $0.p.menuTitle })
+        if let k = keep, let i = shown.firstIndex(where: { $0 === k }) { picker.selectItem(at: i) }
+    }
     func select(_ c: Controller) {
-        if let i = app?.controllers.firstIndex(where: { $0 === c }) { picker.selectItem(at: i) }
+        if let i = shown.firstIndex(where: { $0 === c }) { picker.selectItem(at: i) }
         refresh()
     }
     func refresh() {
@@ -868,6 +877,10 @@ final class Controller: NSObject {
     }
 
     var targetRunning: Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: p.bundleID).isEmpty }
+    /// 这台 Mac 上装了这个应用（或者它正开着 / 正在放动画）才在菜单和设置窗口里出现
+    var installed: Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: p.bundleID) != nil || targetRunning || show != nil
+    }
     var introURL: URL { Bundle.main.url(forResource: "intro", withExtension: "mp4", subdirectory: p.key)! }
     var loopURL: URL { Bundle.main.url(forResource: "loop", withExtension: "mp4", subdirectory: p.key)! }
     func log(_ msg: String) { globalLog("[\(p.menuTitle)] \(msg)") }
@@ -1084,7 +1097,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         for (c, i) in zip(controllers, topItems) {
             c.config = Config.load(c.p); c.refreshMenu()
-            // 应用开着的排前面标个点，一眼看出现在能调哪个
+            i.isHidden = !c.installed   // 装了几个应用就显示几个入口
+            // 应用开着的后面标个点，一眼看出现在能调哪个
             i.title = c.p.menuTitle + (c.targetRunning ? "  ●" : "")
         }
     }
@@ -1116,7 +1130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc func openSettings() {
         controllers.forEach { $0.config = Config.load($0.p) }
-        if settings == nil { settings = SettingsWindow(app: self) }
+        if settings == nil { settings = SettingsWindow(app: self) } else { settings!.reloadPicker() }
         // 默认选中正开着的那个应用
         if let c = controllers.first(where: { $0.targetRunning }) { settings!.select(c) } else { settings!.refresh() }
         settings!.window?.center()

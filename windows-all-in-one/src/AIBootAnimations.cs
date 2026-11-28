@@ -25,6 +25,7 @@
 //   2026-11-28 托盘右键改成两级菜单：一级选应用，二级是原版单独小程序那套设置（去掉 TrayMenu.xaml）；
 //     播放开屏、保留背景、不透明度、音量可以每个应用单独设（没单独设的跟着「启动设置」里的总设置）；
 //     托盘图标和程序图标改用 Claude 版的三颗金色小星星。安装时发现原版小程序先问再卸。
+//     右键菜单只列这台电脑上装了的应用（装了几个就有几个）。
 //
 // 本程序以 GNU GPL v3 发布，见 LICENSE。修改版同样以 GPL-3.0 授权，并保留原作者署名。
 // This program is free software under the GNU General Public License v3.
@@ -2582,12 +2583,62 @@ namespace AIBootAnimations
             foreach (WF.ToolStripItem i in trayMenu.Items) old.Add(i);
             trayMenu.Items.Clear();
             foreach (var i in old) i.Dispose();
-            foreach (var p in Profiles) trayMenu.Items.Add(AppMenu(p));
+            // 装了几个应用就显示几个入口；一个都认不出来时全显示，免得菜单空着
+            var shown = Profiles.Where(Installed).ToList();
+            if (shown.Count == 0) shown = Profiles;
+            foreach (var p in shown) trayMenu.Items.Add(AppMenu(p));
             trayMenu.Items.Add(new WF.ToolStripSeparator());
             trayMenu.Items.Add("启动设置…", null, delegate { OpenSettings(); });
             trayMenu.Items.Add("打开设置文件夹…", null, delegate { OpenConfigFolder(); });
             trayMenu.Items.Add("卸载开机动画…", null, delegate { Uninstall(); });
             trayMenu.Items.Add("退出", null, delegate { Quit(); });
+        }
+
+        /// 这台电脑上装没装这个应用：正开着 / 正在放动画，或者在「已安装的应用」列表（卸载信息）里，或者是商店版（MSIX）应用
+        bool Installed(Profile p)
+        {
+            if (p.Current != null || Finder.Find(p).Valid) return true;
+            string[] hints = InstallHints(p.Key);
+            try
+            {
+                string[] roots = { @"Software\Microsoft\Windows\CurrentVersion\Uninstall", @"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" };
+                foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
+                    foreach (var root in roots)
+                        using (var k = hive.OpenSubKey(root))
+                        {
+                            if (k == null) continue;
+                            foreach (var n in k.GetSubKeyNames())
+                                using (var sub = k.OpenSubKey(n))
+                                {
+                                    var name = sub == null ? null : sub.GetValue("DisplayName") as string;
+                                    if (name != null && Matches(name, hints)) return true;
+                                }
+                        }
+                using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages"))
+                    if (k != null)
+                        foreach (var n in k.GetSubKeyNames())
+                            if (Matches(n, hints)) return true;
+            }
+            catch (Exception e) { Log.W("查 " + p.AppName + " 装没装时出错：" + e.Message); }
+            return false;
+        }
+
+        static string[] InstallHints(string key)
+        {
+            switch (key)
+            {
+                case "claude": return new[] { "Claude" };
+                case "gpt": return new[] { "OpenAI.Codex", "OpenAI.ChatGPT", "ChatGPT" };
+                case "antigravity": return new[] { "Antigravity" };
+                case "deepseek": return new[] { "DeepSeek" };
+                default: return new string[0];
+            }
+        }
+
+        static bool Matches(string name, string[] hints)
+        {
+            foreach (var h in hints) if (name.IndexOf(h, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
         }
 
         static string ShortName(Profile p) { return p.Title.Replace(" 开机动画", ""); }
