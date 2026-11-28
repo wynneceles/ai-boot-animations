@@ -2,7 +2,7 @@
 
 > 属于 [ai-boot-animations](../README.md) 合集，是 [Claude 开机动画](../claude/) 和 [GPT 开机动画](../codex/) 的姊妹版。
 
-给 Google 的 AI 编程工具 Antigravity（Mac / Windows）加一段开机动画：每次打开 Antigravity，先在窗口上播放一段 Gemini 双剑少女的开屏，进入循环画面后慢慢透出真正的 Antigravity 界面，留下一层半透明的动态背景。
+给 Google 的 AI 编程工具 Antigravity（Mac / Windows / Linux）加一段开机动画：每次打开 Antigravity，先在窗口上播放一段 Gemini 双剑少女的开屏，进入循环画面后慢慢透出真正的 Antigravity 界面，留下一层半透明的动态背景。
 
 ![预览](docs/preview.jpg)
 
@@ -54,6 +54,26 @@ cd ai-boot-animations/antigravity
 会下载约 49MB，用 Windows 自带的编译器现场编译（不用装任何 SDK），装到**剩余空间最大的非系统盘**（例如 `D:\AIBootAnimations\AntigravityBootAnimation`，只有 C 盘时才装 C 盘；想自己指定位置，先运行 `$env:AGBA_DIR='E:\某个文件夹'` 再粘贴安装命令），右下角托盘出现蓝紫色四芒星图标并弹出设置窗口。打开 Antigravity（窗口进程 `Antigravity.exe`）时自动播放。和 Claude、GPT 版可以同时装。卸载：托盘四芒星图标右键 →「卸载 Gemini 开机动画…」。
 
 设置文件：`%APPDATA%\AntigravityBootAnimation\config.json`；日志：`%LOCALAPPDATA%\AntigravityBootAnimation\log.txt`。
+
+### Linux
+
+支持 **X11**（任意桌面）、**GNOME Wayland**（45–50，含配套窗口跟随扩展）、**KDE Plasma Wayland** 与 **Hyprland**。使用原生 GTK 4 + GStreamer，不修改 Antigravity 本体。
+
+**一行命令安装**：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wynneceles/ai-boot-animations/main/antigravity/linux/web-install.sh | bash
+```
+
+**从源码安装**：
+
+```bash
+git clone https://github.com/wynneceles/ai-boot-animations.git
+cd ai-boot-animations/antigravity/linux
+./install.sh
+```
+
+系统依赖（PyGObject / GTK 4 / GStreamer `gtk4paintablesink`）、各桌面环境说明、配置文件路径（`~/.config/antigravity-boot-animation/config.json`）与卸载方式见 [linux/README.md](linux/README.md)。
 
 ## 菜单栏 ✦ 能干什么
 
@@ -148,4 +168,4 @@ Antigravity 开着的时候，菜单栏右边会出现一个四芒星 ✦，点�
 
 ---
 
-**English (short):** An unofficial Gemini boot animation for Google's Antigravity IDE (bundle id `com.google.antigravity`) on macOS and Windows (`Antigravity.exe`). A tiny menu-bar helper overlays Antigravity's window with an intro animation, then fades into a translucent, click-through looping background. It never modifies Antigravity.app and can be installed alongside the Claude and GPT boot animations. Install with the one-liners above (macOS 13+ / Windows 10–11); uninstall from the ✦ menu or with `./uninstall.sh`. Code is GPL-3.0; animation assets are CC BY-NC-ND 4.0.
+**English (short):** An unofficial Gemini boot animation for Google's Antigravity IDE (`com.google.antigravity` on macOS, `Antigravity.exe` on Windows, `antigravity` on Linux). A tiny menu-bar/tray helper overlays Antigravity's window with an intro animation, then fades into a translucent, click-through looping background. It never modifies Antigravity itself and can be installed alongside the Claude and GPT boot animations. Install with the one-liners above (macOS 13+ / Windows 10–11 / Linux GTK4+GStreamer — see [linux/README.md](linux/README.md)); uninstall from the ✦ menu/tray or with `./uninstall.sh`. Code is GPL-3.0; animation assets are CC BY-NC-ND 4.0.

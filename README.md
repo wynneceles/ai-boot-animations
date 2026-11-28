@@ -6,7 +6,7 @@
 |---|---|---|
 | **Claude** 桌面端 | 月下持剑少女：线稿 → 上色 → 剑光、火凤、烟花，带音效和英文字幕；菜单栏 ✨ 可调背景浓度、开屏音量，可只留动态背景 | [claude/](claude/) |
 | **ChatGPT** 桌面端（含 Codex） | 星空塔罗龙娘：发光线稿 → 展翅、七张牌亮起 → 光带环绕 → 光汇入手心 → 甩牌挡嘴，带音效、英文配音和字幕；菜单栏 🌙 可调，和 Claude 版可以同时装；Mac 和 Windows 都有 | [codex/](codex/) |
-| **Antigravity**（Google 的 AI 编程工具） | Gemini 双剑少女：发光线稿 → 剑尖星芒 → 双剑相击，带音效、英文配音和字幕；菜单栏 ✦ 可调，和 Claude、GPT 版可以同时装；Mac 和 Windows 都有 | [antigravity/](antigravity/) |
+| **Antigravity**（Google 的 AI 编程工具） | Gemini 双剑少女：发光线稿 → 剑尖星芒 → 双剑相击，带音效、英文配音和字幕；菜单栏 ✦ 可调，和 Claude、GPT 版可以同时装；Mac、Windows 和 Linux 都有 | [antigravity/](antigravity/) |
 | **DeepSeek Harness**（DeepSeek 的 AI 编程工具） | 大肥鱼深海弓手：发光线稿 → 跃出海面对月张弓 → 箭拖着光尾消失 → 月下睁眼，带音效、英文配音和字幕；菜单栏 🐟 可调，和 Claude、GPT、Gemini 版可以同时装；Mac 和 Windows 都有 | [deepseek/](deepseek/) |
 
 更多动画陆续加入。
