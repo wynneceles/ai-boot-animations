@@ -147,6 +147,8 @@ namespace ClaudeBootAnimation
     /// 双显卡笔记本上 Windows 默认让新程序用核显，播 4K 视频会掉帧。
     /// 启动时检查有没有两块以上显卡：有，就在「设置 → 系统 → 显示 → 图形」里把本程序设为「高性能」（等同用户手动去选）。
     /// 用户自己在那里选过（不管选了什么）就不再动；只有一块显卡什么都不做。卸载时 uninstall.ps1 会删掉这一项。
+    /// 双显卡机器差别很大（有的屏幕接在核显上，独显画完还要再搬一道，反而更费 CPU，#9），
+    /// 所以托盘菜单和设置窗口里可以自己选「让 Windows 决定 / 省电 / 高性能」，选完自动重启小程序生效。
     public static class GpuPref
     {
         const string Key = @"Software\Microsoft\DirectX\UserGpuPreferences";
@@ -160,13 +162,58 @@ namespace ClaudeBootAnimation
                     if (k == null) return;
                     var cur = k.GetValue(exe) as string;
                     if (cur != null) { Log.W("显卡偏好已有设置（" + cur + "），不改动"); return; }
-                    var gpus = ListGpus();
+                    var gpus = ListGpus(); GpuPref.gpus = gpus;
                     if (gpus.Count < 2) { Log.W("显卡：" + (gpus.Count == 0 ? "未识别" : string.Join("、", gpus)) + "，不用切换独显"); return; }
                     k.SetValue(exe, "GpuPreference=2;", RegistryValueKind.String);
                     Log.W("检测到多块显卡（" + string.Join("、", gpus) + "），已设为用高性能显卡渲染");
                 }
             }
             catch (Exception ex) { Log.W("独显设置失败：" + ex.Message); }
+        }
+
+        /// 用户手动选的渲染显卡：0 = 让 Windows 决定，1 = 省电（核显），2 = 高性能（独显）；-1 = 还没设过
+        public static int Current()
+        {
+            try
+            {
+                string exe = Process.GetCurrentProcess().MainModule.FileName;
+                using (var k = Registry.CurrentUser.OpenSubKey(Key))
+                {
+                    var cur = k == null ? null : k.GetValue(exe) as string;
+                    if (cur == null) return -1;
+                    var m = System.Text.RegularExpressions.Regex.Match(cur, @"GpuPreference=(\d)");
+                    return m.Success ? int.Parse(m.Groups[1].Value) : -1;
+                }
+            }
+            catch { return -1; }
+        }
+
+        /// 写进「设置 → 系统 → 显示 → 图形」里本程序的那一项（和用户在系统设置里手动选一样），下次启动生效
+        public static bool Set(int pref)
+        {
+            try
+            {
+                string exe = Process.GetCurrentProcess().MainModule.FileName;
+                using (var k = Registry.CurrentUser.CreateSubKey(Key))
+                {
+                    if (k == null) return false;
+                    k.SetValue(exe, "GpuPreference=" + pref + ";", RegistryValueKind.String);
+                }
+                Log.W("渲染显卡改为：" + Name(pref));
+                return true;
+            }
+            catch (Exception ex) { Log.W("渲染显卡设置失败：" + ex.Message); return false; }
+        }
+
+        public static readonly string[] Names = { "让 Windows 决定", "省电（核显）", "高性能（独显）" };
+        public static string Name(int pref) { return pref >= 0 && pref < Names.Length ? Names[pref] : "未设置"; }
+
+        /// 有两块以上真实显卡才显示切换项（只有一块时选什么都一样）
+        static List<string> gpus;
+        public static bool HasChoice()
+        {
+            try { if (gpus == null) gpus = ListGpus(); } catch { gpus = new List<string>(); }
+            return gpus.Count >= 2;
         }
 
         /// 列出真实显卡（排除远程桌面、虚拟显示器这类假适配器）
@@ -1453,6 +1500,7 @@ namespace ClaudeBootAnimation
     {
         readonly App app;
         CheckBox introBox, loopBox;
+        ComboBox gpuBox;
         Slider alphaSlider, volSlider;
         TextBlock alphaVal, volVal;
         bool loading;
@@ -1483,6 +1531,15 @@ namespace ClaudeBootAnimation
             row.Children.Add(Btn("开启循环背景", delegate { app.PreviewLoop(); }));
             row.Children.Add(Btn("关掉", delegate { app.StopShow(); }));
             sp.Children.Add(row);
+            if (GpuPref.HasChoice())
+            {
+                sp.Children.Add(Header("渲染显卡"));
+                gpuBox = new ComboBox { Margin = new Thickness(0, 8, 0, 2), Width = 200, HorizontalAlignment = HorizontalAlignment.Left };
+                foreach (var n in GpuPref.Names) gpuBox.Items.Add(n);
+                gpuBox.SelectionChanged += delegate { if (!loading && gpuBox.SelectedIndex >= 0) app.SetGpu(gpuBox.SelectedIndex); };
+                sp.Children.Add(gpuBox);
+                sp.Children.Add(new TextBlock { Text = "双显卡电脑上哪个更省电、更流畅因机器而异，换完会自动重启小程序", Foreground = Brushes.Gray, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 6) });
+            }
             var row2 = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
             row2.Children.Add(Btn("打开设置文件…", delegate { app.OpenConfig(); }));
             row2.Children.Add(Btn("卸载…", delegate { app.Uninstall(); }));
@@ -1518,6 +1575,7 @@ namespace ClaudeBootAnimation
             var c = app.Config;
             introBox.IsChecked = c.PlayIntro; loopBox.IsChecked = c.LoopBackground;
             alphaSlider.Value = c.ResidualAlpha; volSlider.Value = c.IntroVolume;
+            if (gpuBox != null) gpuBox.SelectedIndex = GpuPref.Current();
             alphaVal.Text = Math.Round(c.ResidualAlpha * 100) + "%"; volVal.Text = Math.Round(c.IntroVolume * 100) + "%";
             loading = false;
         }
@@ -1541,7 +1599,7 @@ namespace ClaudeBootAnimation
         public Config Config;
         Show show;
         WF.NotifyIcon tray;
-        WF.ToolStripMenuItem introItem, loopItem, loopNowItem, pauseItem;
+        WF.ToolStripMenuItem introItem, loopItem, loopNowItem, pauseItem, gpuItem;
         WF.ToolStripLabel alphaLabel, volLabel;
         WF.TrackBar alphaBar, volBar;
         SettingsWindow settings;
@@ -1599,6 +1657,7 @@ namespace ClaudeBootAnimation
             // 开机时 Claude 已经开着：不补播
             var t0 = Finder.Find();
             if (t0.Valid && !testMode) seenPids.Add(t0.Pid);
+            if (t0.Valid && !testMode && Has("--resume-loop")) Start(t0, false); // 切换显卡重启前正在放：接着放循环背景
 
             watch = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
             watch.Tick += delegate { Watch(); };
@@ -1703,6 +1762,27 @@ namespace ClaudeBootAnimation
             Quit();
         }
 
+        /// 换渲染显卡：显卡是程序启动时定下的，所以写好设置后重启小程序。正在放的循环背景重启后接着放
+        public void SetGpu(int pref)
+        {
+            if (pref == GpuPref.Current()) return;
+            var r = MessageBox.Show("改成「" + GpuPref.Name(pref) + "」需要重启这个小程序（一两秒），正在放的循环背景会接着放。\n\n"
+                + "哪个更省电、更流畅因电脑而异：换完可以在任务管理器里看看 CPU 占用，不合适再换回来。",
+                "切换渲染显卡", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+            if (r != MessageBoxResult.OK) { if (settings != null) settings.Refresh(); return; }
+            if (!GpuPref.Set(pref)) { MessageBox.Show("没改成，详情见日志。", "切换渲染显卡"); return; }
+            bool resume = show != null && show.Playing;
+            string a = "--restart-after " + Process.GetCurrentProcess().Id + (resume ? " --resume-loop" : "") + (settings != null && settings.IsVisible ? " --settings" : "");
+            try
+            {
+                Process.Start(new ProcessStartInfo(Process.GetCurrentProcess().MainModule.FileName, a) { UseShellExecute = false });
+            }
+            catch (Exception ex) { Log.W("重启失败：" + ex.Message); MessageBox.Show("设置已保存，下次启动生效。", "切换渲染显卡"); return; }
+            Log.W("为切换渲染显卡重启 " + a);
+            if (show != null) show.Teardown();
+            Quit();
+        }
+
         void Quit()
         {
             if (tray != null) { tray.Visible = false; tray.Dispose(); }
@@ -1769,6 +1849,21 @@ namespace ClaudeBootAnimation
             pauseItem.Click += delegate { if (show != null) show.SetPaused(!show.Paused); };
             m.Items.Add(pauseItem);
             m.Items.Add(new WF.ToolStripSeparator());
+            if (GpuPref.HasChoice())
+            {
+                gpuItem = new WF.ToolStripMenuItem("渲染显卡");
+                for (int i = 0; i < GpuPref.Names.Length; i++)
+                {
+                    int pref = i;
+                    gpuItem.DropDownItems.Add(new WF.ToolStripMenuItem(GpuPref.Names[i], null, delegate { SetGpu(pref); }));
+                }
+                gpuItem.DropDownOpening += delegate
+                {
+                    int cur = GpuPref.Current();
+                    for (int i = 0; i < gpuItem.DropDownItems.Count; i++) ((WF.ToolStripMenuItem)gpuItem.DropDownItems[i]).Checked = i == cur;
+                };
+                m.Items.Add(gpuItem);
+            }
             m.Items.Add("设置窗口…", null, delegate { OpenSettings(); });
             m.Items.Add("打开设置文件…", null, delegate { OpenConfig(); });
             m.Items.Add("卸载 Claude 开机动画…", null, delegate { Uninstall(); });
@@ -1912,6 +2007,14 @@ namespace ClaudeBootAnimation
             bool test = Array.IndexOf(args, "--target-title") >= 0 || Array.IndexOf(args, "--render-subtitle") >= 0 || Array.IndexOf(args, "--bench") >= 0;
             Mutex mutex = null;
             EventWaitHandle showEvent = null;
+            int ri = Array.IndexOf(args, "--restart-after");
+            if (ri >= 0 && ri + 1 < args.Length)
+            {
+                // 切换渲染显卡后的重启：等旧的那个完全退出（单实例锁放掉）再往下走
+                int oldPid;
+                if (int.TryParse(args[ri + 1], out oldPid))
+                    try { using (var old = Process.GetProcessById(oldPid)) old.WaitForExit(8000); } catch { }
+            }
             if (!test)
             {
                 bool created;
