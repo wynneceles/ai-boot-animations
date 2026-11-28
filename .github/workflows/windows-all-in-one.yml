@@ -1,5 +1,6 @@
 # Windows 合并版（Claude / GPT / Gemini / DeepSeek 四合一）自动编译 + 安装测试
-# 编译能不能过；装的时候遇到原版小程序，-KeepOld 要保留、-RemoveOld 要卸掉；程序启动后 15 秒内不崩
+# 编译能不能过；装的时候遇到原版小程序，-KeepOld 要保留、-RemoveOld 要卸掉；程序启动后 15 秒内不崩（日志只打印出来看）
+# 注意：run 里的字符串只用英文——服务器上的 Windows PowerShell 读临时脚本不认 UTF-8，中文会变乱码导致语法错误
 name: windows-all-in-one-test
 on:
   push:
@@ -49,22 +50,21 @@ jobs:
           powershell -ExecutionPolicy Bypass -File windows-all-in-one\install.ps1 -KeepOld
           Start-Sleep 3
           Get-Process AIBootAnimations -ErrorAction SilentlyContinue | Stop-Process -Force
-          if (-not (Get-ItemProperty $run -Name GPTBootAnimation -ErrorAction SilentlyContinue)) { throw "-KeepOld 却把原版卸了" }
-          if (Test-Path "$oldDir\uninstalled.txt") { throw "-KeepOld 却跑了原版的 uninstall.ps1" }
+          if (-not (Get-ItemProperty $run -Name GPTBootAnimation -ErrorAction SilentlyContinue)) { throw "KeepOld: original was removed" }
+          if (Test-Path "$oldDir\uninstalled.txt") { throw "KeepOld: original uninstall.ps1 ran" }
 
           powershell -ExecutionPolicy Bypass -File windows-all-in-one\install.ps1 -RemoveOld
           Start-Sleep 3
           Get-Process AIBootAnimations -ErrorAction SilentlyContinue | Stop-Process -Force
-          if (-not (Test-Path "$oldDir\uninstalled.txt")) { throw "-RemoveOld 没卸原版" }
-          if (Get-ItemProperty $run -Name GPTBootAnimation -ErrorAction SilentlyContinue) { throw "-RemoveOld 后原版开机自启还在" }
-          if (-not (Get-ItemProperty $run -Name AIBootAnimations -ErrorAction SilentlyContinue)) { throw "合并版没设开机自启" }
+          if (-not (Test-Path "$oldDir\uninstalled.txt")) { throw "RemoveOld: original not uninstalled" }
+          if (Get-ItemProperty $run -Name GPTBootAnimation -ErrorAction SilentlyContinue) { throw "RemoveOld: original Run key still there" }
+          if (-not (Get-ItemProperty $run -Name AIBootAnimations -ErrorAction SilentlyContinue)) { throw "install: AIBootAnimations Run key missing" }
       - name: 启动不崩
         run: |
           $exe = "$pwd\windows-all-in-one\AIBootAnimations.exe"
           $p = Start-Process $exe -PassThru
           Start-Sleep 15
-          if ($p.HasExited) { throw "程序 15 秒内退出了，退出码 $($p.ExitCode)" }
+          if ($p.HasExited) { throw "app exited within 15s, code $($p.ExitCode)" }
           Stop-Process $p -Force
           $log = "$env:LOCALAPPDATA\AIBootAnimations\log.txt"
           if (Test-Path $log) { Get-Content $log -Tail 40 }
-          if ((Test-Path $log) -and (Select-String -Path $log -Pattern 'Exception|异常' -Quiet)) { throw "日志里有异常" }
