@@ -227,6 +227,7 @@ namespace ClaudeBootAnimation
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
         [DllImport("user32.dll")] public static extern bool SetLayeredWindowAttributes(IntPtr h, uint key, byte alpha, uint flags);
+        [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr h, out uint key, out byte alpha, out uint flags);
         public delegate void WinEventProc(IntPtr hook, uint ev, IntPtr h, int idObject, int idChild, uint thread, uint time);
         [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint evMin, uint evMax, IntPtr mod, WinEventProc proc, uint pid, uint tid, uint flags);
         [DllImport("user32.dll")] public static extern bool UnhookWinEvent(IntPtr hook);
@@ -234,6 +235,8 @@ namespace ClaudeBootAnimation
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
         [DllImport("shcore.dll")] static extern int SetProcessDpiAwareness(int v);
         [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);
+        public delegate bool MonitorEnumProc(IntPtr mon, IntPtr dc, IntPtr rect, IntPtr data);
+        [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorEnumProc cb, IntPtr data);
         [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor, rcWork; public int dwFlags; }
         [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr mon, ref MONITORINFO mi);
 
@@ -262,6 +265,19 @@ namespace ClaudeBootAnimation
             if (!GetMonitorInfo(mon, ref mi)) return false;
             r = mi.rcMonitor; return true;
         }
+        // 多屏幕可视整合
+        public static bool AllMonitorRects(List<RECT> rects)
+        {
+            bool ok = EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, delegate (IntPtr mon, IntPtr dc, IntPtr rect, IntPtr data)
+            {
+                var mi = new MONITORINFO { cbSize = Marshal.SizeOf(typeof(MONITORINFO)) };
+                if (!GetMonitorInfo(mon, ref mi)) return false;
+                if (mi.rcMonitor.Right > mi.rcMonitor.Left && mi.rcMonitor.Bottom > mi.rcMonitor.Top)
+                    rects.Add(mi.rcMonitor);
+                return true;
+            }, IntPtr.Zero);
+            return ok && rects.Count > 0;
+        }
         [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
         [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
         [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
@@ -282,9 +298,23 @@ namespace ClaudeBootAnimation
         public const int GWL_EXSTYLE = -20, GWLP_HWNDPARENT = -8;
         public const long WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000, WS_EX_APPWINDOW = 0x40000;
         public const uint SWP_NOSIZE = 1, SWP_NOMOVE = 2, SWP_NOZORDER = 4, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_NOOWNERZORDER = 0x200;
-        public const uint LWA_ALPHA = 2, GW_OWNER = 4;
+        // GW_HWNDPREV
+        // 传给GetWindow，获取当前窗口上方的
+        public const uint LWA_ALPHA = 2, GW_OWNER = 4, GW_HWNDPREV = 3;
 
         public static long GetLong(IntPtr h, int i) { return IntPtr.Size == 8 ? GetWindowLongPtr64(h, i).ToInt64() : GetWindowLong32(h, i); }
+        // 判断一个窗口是否为全透明
+        // 目前没想好如何判断部分穿透的窗口
+        public static bool FullyTransparent(IntPtr h)
+        {
+            if ((GetLong(h, GWL_EXSTYLE) & WS_EX_LAYERED) == 0) return false;
+            // 这里内联了在我电脑上编译失败
+            uint key, flags;
+            byte alpha;
+            return GetLayeredWindowAttributes(h, out key, out alpha, out flags)
+                && (flags & LWA_ALPHA) != 0
+                && alpha == 0;
+        }
         public static void SetLong(IntPtr h, int i, long v)
         {
             if (IntPtr.Size == 8) SetWindowLongPtr64(h, i, new IntPtr(v)); else SetWindowLong32(h, i, (int)v);
@@ -1113,6 +1143,12 @@ namespace ClaudeBootAnimation
             CheckSwap();
             CheckHandoff();
             long now = clock.ElapsedMilliseconds;
+            // 一个小型计时器，每过1000ms检查一次，防止检查太频繁
+            if (now >= nextCheckCoverTime)
+            {
+                nextCheckCoverTime = now + 1000;
+                CheckCover();
+            }
             CheckRetire(now);
             DevHooks(now);
             if (pendingAt > 0 && now >= pendingAt && !hidden && !paused && phase == Phase.Revealed && introGone) // 暂停时先不重建，继续播放后再补
@@ -1230,6 +1266,81 @@ namespace ClaudeBootAnimation
             int cmd = show ? 4 /*SW_SHOWNOACTIVATE*/ : 0 /*SW_HIDE*/;
             if (overlayH != IntPtr.Zero) Native.ShowWindow(overlayH, cmd);
             if (topH != IntPtr.Zero) Native.ShowWindow(topH, cmd);
+        }
+
+        // 覆盖检查计时器时间，每次触发就+1000ms，等时间匹配
+        long nextCheckCoverTime;
+        // 遮挡消失的时候，是否由覆盖检查器恢复
+        // true 代表暂停为检查器设置
+        // false 代表为手动暂停
+        bool resumeOnUncover;
+
+        /// 每秒估算浮层被更上层窗口盖住的面积；多个窗口重叠的部分只算一次
+        void CheckCover()
+        {
+            // overlay隐藏 || overlay未识别到 || 未进入循环动画
+            // 开屏动画不会进行暂停检测，只会检测循环
+            if (hidden || overlayH == IntPtr.Zero || phase != Phase.Revealed || !introGone) return;
+            // 保存当前overlay的位置和大小
+            Native.RECT box;
+            // 如果读取失败或者读取数值有问题就退出
+            if (!Native.Bounds(overlayH, out box) || box.Right <= box.Left || box.Bottom <= box.Top) return;
+            // 获取所有显示屏并加入
+            var monitors = new List<Native.RECT>();
+            if (!Native.AllMonitorRects(monitors)) return;
+
+            // 从整个浮层开始，只保留各显示器内的区域；屏幕外和多屏之间的空隙都算不可见
+            using (var visible = new SD.Region(new SD.Rectangle(box.Left, box.Top, box.Right - box.Left, box.Bottom - box.Top)))
+            {
+                using (var screenArea = new SD.Region())
+                {
+                    screenArea.MakeEmpty();
+                    foreach (var screen in monitors)
+                        screenArea.Union(new SD.Rectangle(screen.Left, screen.Top, screen.Right - screen.Left, screen.Bottom - screen.Top));
+                    visible.Intersect(screenArea);
+                }
+                // 已检查的窗口
+                var seen = new HashSet<IntPtr>();
+                // 获取overlay上方的窗口，用GW_HWNDPREV
+                IntPtr h = Native.GetWindow(overlayH, Native.GW_HWNDPREV);
+                while (h != IntPtr.Zero && seen.Add(h))
+                {
+                    // 窗口可见 && 不是最小化 && 未被隐藏 && 不是整窗全透明
+                    if (Native.IsWindowVisible(h) && !Native.IsIconic(h) && !Native.Cloaked(h) && !Native.FullyTransparent(h))
+                    {
+                        // 获取符合条件的窗口，取窗口和overlay重叠区域，从visible扣了
+                        Native.RECT r;
+                        if (Native.Bounds(h, out r))
+                        {
+                            int left = Math.Max(box.Left, r.Left), top = Math.Max(box.Top, r.Top);
+                            int right = Math.Min(box.Right, r.Right), bottom = Math.Min(box.Bottom, r.Bottom);
+                            if (right > left && bottom > top)
+                                visible.Exclude(new SD.Rectangle(left, top, right - left, bottom - top));
+                        }
+                    }
+                    // 取下一个窗口
+                    h = Native.GetWindow(h, Native.GW_HWNDPREV);
+                }
+
+                // overlay可视面积，将剩余的部分累加
+                double remaining = 0;
+                // 将最后剩余的内容切成多个矩形，计算面积并相加
+                using (var transform = new SD.Drawing2D.Matrix())
+                    foreach (var r in visible.GetRegionScans(transform)) remaining += r.Width * r.Height;
+                // 剩余的部分小于10%，也就是遮住90%以上
+                bool covered = remaining <= (double)(box.Right - box.Left) * (box.Bottom - box.Top) * 0.1;
+                if (covered && !paused)
+                {
+                    SetPaused(true);
+                    resumeOnUncover = paused;
+                }
+                else if (!covered && resumeOnUncover)
+                    SetPaused(false);
+                // 已暂停时可能刚切到新播放器，每秒重新确认它也停住了。
+                if (covered)
+                    foreach (var m in new[] { intro, loopA, loopB })
+                        if (m != null) { try { m.Pause(); } catch { } }
+            }
         }
 
         /// 分层（整窗半透明）+ 不出现在任务栏 + 不抢焦点；透出后再加点击穿透。被冲掉就补回来
@@ -1400,11 +1511,15 @@ namespace ClaudeBootAnimation
         public bool CanPause { get { return phase == Phase.Revealed; } }
 
         // ── 暂停循环背景：画面停在当前这一帧，背景照样盖着；再点继续 ──
+        // 画面被遮挡足够部分时也暂停
         bool paused;
         public bool Paused { get { return paused; } }
         public void SetPaused(bool p)
         {
-            if (phase != Phase.Revealed || p == paused) return;
+            // 默认为不接管，在接管逻辑中会手动将这个设为true来保证自己的操控权
+            if (phase != Phase.Revealed) return;
+            resumeOnUncover = false;
+            if (p == paused) return;
             if (p)
             {
                 if (swapFrom != null) FinishSwap();   // 正在接缝：先接完
