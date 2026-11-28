@@ -1725,16 +1725,16 @@ namespace DeepSeekBootAnimation
             using (var g = SD.Graphics.FromImage(bmp))
             {
                 g.SmoothingMode = SD.Drawing2D.SmoothingMode.AntiAlias;
-                // 一颗弧边四芒星，深海蓝→青渐变（DeepSeek 鲸鱼蓝），和 Claude 的金色 ✨、GPT 的月牙、Gemini 的蓝紫星区分开
-                using (var path = new SD.Drawing2D.GraphicsPath())
+                // 一条小鱼（大肥鱼，和 Mac 版菜单栏的 fish 图标对应），深海蓝→青渐变（DeepSeek 鲸鱼蓝），眼睛镂空
+                using (var path = new SD.Drawing2D.GraphicsPath(SD.Drawing2D.FillMode.Alternate))
                 {
-                    float c = 16, r = 15, q = 1.5f;   // 中心、尖端半径、弧线往中心收的程度
                     path.StartFigure();
-                    path.AddBezier(c, c - r, c + q, c - q, c + q, c - q, c + r, c);
-                    path.AddBezier(c + r, c, c + q, c + q, c + q, c + q, c, c + r);
-                    path.AddBezier(c, c + r, c - q, c + q, c - q, c + q, c - r, c);
-                    path.AddBezier(c - r, c, c - q, c - q, c - q, c - q, c, c - r);
+                    path.AddBezier(3f, 16f, 8f, 6f, 18f, 6f, 23f, 15f);          // 背
+                    path.AddLines(new[] { new SD.PointF(23f, 15f), new SD.PointF(30f, 8f), new SD.PointF(27f, 16f),
+                                          new SD.PointF(30f, 24f), new SD.PointF(23f, 17f) });   // 鱼尾
+                    path.AddBezier(23f, 17f, 18f, 26f, 8f, 26f, 3f, 16f);        // 肚子
                     path.CloseFigure();
+                    path.AddEllipse(7.2f, 12.7f, 3.6f, 3.6f);                   // 眼睛（交替填充 = 镂空）
                     using (var b = new SD.Drawing2D.LinearGradientBrush(new SD.PointF(2, 30), new SD.PointF(30, 2),
                         SD.Color.FromArgb(255, 77, 107, 254), SD.Color.FromArgb(255, 90, 210, 255)))
                         g.FillPath(b, path);
