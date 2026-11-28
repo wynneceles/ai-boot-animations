@@ -1,6 +1,6 @@
 <!--
   「启动设置」窗口的界面。作为资源嵌在 AIBootAnimations.exe 里，由 SettingsWindow 用 XamlReader 载入；
-  x:Name 起了名字的控件在代码里接线，三个应用那几行（AppsPanel）由代码按 Profile 生成。
+  x:Name 起了名字的控件在代码里接线，各应用的行（AppsPanel）由代码按 Profile 生成。
   改这里的颜色、间距、文字后重新运行 build.ps1 即可。
 -->
 <Border xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"

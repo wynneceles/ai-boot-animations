@@ -1,11 +1,11 @@
-﻿// AI 开机动画 · 合并版（Claude / ChatGPT / Antigravity 三合一）· Windows —— 外置浮层小程序
-// 一个托盘图标统一控制三个开机动画：检测 Claude、ChatGPT（含 Codex）、Antigravity 启动 → 盖在各自的主窗口上播放各自的开屏动画
-// → 进入循环帧后半透明、点击穿透，作为循环背景一直播放。不修改这三个应用的任何文件。
+﻿// AI 开机动画 · 合并版（Claude / ChatGPT / Antigravity / DeepSeek Harness 四合一）· Windows —— 外置浮层小程序
+// 一个托盘图标统一控制四个开机动画：检测 Claude、ChatGPT（含 Codex）、Antigravity、DeepSeek Harness 启动 → 盖在各自的主窗口上播放各自的开屏动画
+// → 进入循环帧后半透明、点击穿透，作为循环背景一直播放。不修改这四个应用的任何文件。
 // 用系统自带的 .NET Framework 4.x 编译器编译（C# 5 语法），不需要装任何 SDK。
 //
 // 原作：wynneceles 的 ai-boot-animations（https://github.com/wynneceles/ai-boot-animations）
-//   Windows 版 ClaudeBootAnimation.cs（v1.2.6）、GPTBootAnimation.cs（gpt-v1.2.5）、AntigravityBootAnimation.cs（gemini-v1.1.0），
-//   原始文件在原作者仓库的 claude/ codex/ antigravity/ 各自的 windows/src 里（单独发布时另存了一份在 upstream\）。
+//   Windows 版 ClaudeBootAnimation.cs（v1.2.6）、GPTBootAnimation.cs（gpt-v1.2.5）、AntigravityBootAnimation.cs（gemini-v1.1.0）、DeepSeekBootAnimation.cs，
+//   原始文件在原作者仓库的 claude/ codex/ antigravity/ deepseek/ 各自的 windows/src 里（单独发布时另存了一份在 upstream\）。
 // Copyright (C) 2026 wynneceles
 //
 // 修改说明：
@@ -20,6 +20,11 @@
 //     去掉右上角的「跳过」，开屏时点画面任意位置即跳过。
 //   2026-11-27 背景适配只留浅色 / 原样；「关闭窗口时」移到左栏，次要功能收进右下角「设定」小菜单；
 //     托盘右键菜单改成 WPF 小窗口（TrayMenu.xaml，只有「启动设置 / 退出」）；exe 加上程序图标（Icons.Logo → app.ico）。
+//
+//   2026-11-28 同步 Windows 单独版的播放器换新、分层外壳、窗口事件和性能采样，加入 DeepSeek Harness。
+//   2026-11-28 托盘右键改成两级菜单：一级选应用，二级是原版单独小程序那套设置（去掉 TrayMenu.xaml）；
+//     播放开屏、保留背景、不透明度、音量可以每个应用单独设（没单独设的跟着「启动设置」里的总设置）；
+//     托盘图标和程序图标改用 Claude 版的三颗金色小星星。安装时发现原版小程序先问再卸。
 //
 // 本程序以 GNU GPL v3 发布，见 LICENSE。修改版同样以 GPL-3.0 授权，并保留原作者署名。
 // This program is free software under the GNU General Public License v3.
@@ -52,7 +57,7 @@ using SD = System.Drawing;
 
 namespace AIBootAnimations
 {
-    // ───────────────────────── 三个应用 ─────────────────────────
+    // ───────────────────────── 四个应用 ─────────────────────────
 
     public class Subtitle
     {
@@ -60,14 +65,15 @@ namespace AIBootAnimations
         public Subtitle(string t, double s, double e) { Text = t; Start = s; End = e; }
     }
 
-    /// 一个目标应用。原来三个小程序之间不同的地方都收在这里，其余代码三个应用共用
+    /// 一个目标应用。各应用的进程、素材和动画参数集中在这里
     public class Profile
     {
-        public string Key;               // 设置里的名字和素材子文件夹：claude / gpt / antigravity
-        public string Title;             // 原小程序的名字：Claude 开机动画 / GPT 开机动画 / Gemini 开机动画
-        public string AppName;           // 目标应用：Claude / ChatGPT / Antigravity
+        public string Key;               // 设置里的名字和素材子文件夹：claude / gpt / antigravity / deepseek
+        public string Title;             // 原小程序的名字
+        public string AppName;           // 设置与日志里显示的目标应用名
         public double KeyLo, KeyHi;      // 循环背景去背景的亮度阈值：低于 KeyLo 的星空透明，高于 KeyHi 的人物保留（按各自星空亮度量出来的）
         public string[] ProcessNames;    // 目标窗口所属的进程名（不带 .exe）
+        public bool IgnoreProcessSeparators;
         public bool RequireChromeClass;  // Claude 版只认 Electron 主窗口类名 Chrome_WidgetWin_1
         public string OverlayTitle;      // 浮层窗口标题
         public double FadeStartSeconds;  // 成片里进入循环帧的时间点（各动画不同）
@@ -82,6 +88,12 @@ namespace AIBootAnimations
         public ImageSource IconImage;                          // 设置窗口用（高清）
 
         public string AssetsDir { get { return Path.Combine(App.AssetsRoot, Key); } }
+
+        public bool MatchesProcess(string name)
+        {
+            if (IgnoreProcessSeparators) name = name.Replace(" ", "").Replace("-", "").Replace("_", "");
+            return Array.Exists(ProcessNames, delegate (string n) { return string.Equals(n, name, StringComparison.OrdinalIgnoreCase); });
+        }
 
         public List<Subtitle> MakeSubtitles()
         {
@@ -135,11 +147,24 @@ namespace AIBootAnimations
                     },
                     DrawIcon = Icons.Gemini
                 },
+                new Profile
+                {
+                    Key = "deepseek", Title = "DeepSeek 开机动画", AppName = "DeepSeek Harness",
+                    KeyLo = 0.10, KeyHi = 0.22, // 取自循环素材暗部的亮度估值，单独版没有去背景参数
+                    ProcessNames = new[] { "deepseekharness" }, IgnoreProcessSeparators = true,
+                    OverlayTitle = "DeepSeek Boot Animation",
+                    FadeStartSeconds = 11.7, ShowSubtitles = true,
+                    Subtitles = new[] {
+                        new Subtitle("Where the moonlight falls, the deep answers.", 0.0, 3.833),
+                        new Subtitle("Name your target, I never miss!", 4.334, 6.8),
+                    },
+                    DrawIcon = Icons.DeepSeek
+                },
             };
         }
     }
 
-    /// 托盘和菜单的小图标：沿用原版三个小程序各自的图标，合并版托盘图标把三个拼在一起
+    /// 托盘和菜单的小图标：沿用单独版各自的图标，合并版托盘图标把四个拼在一起
     public static class Icons
     {
         static void Star(SD.Graphics g, float cx, float cy, float r, SD.Color color)
@@ -201,12 +226,30 @@ namespace AIBootAnimations
             }
         }
 
-        /// 合并版托盘图标：左下金色大星（Claude）、右上月牙（GPT）、右下蓝紫四芒星（Gemini）。托盘里只有 16–24 像素，每个应用只取一个元素
+        public static void DeepSeek(SD.Graphics g)
+        {
+            using (var path = new SD.Drawing2D.GraphicsPath(SD.Drawing2D.FillMode.Alternate))
+            {
+                path.StartFigure();
+                path.AddBezier(3f, 16f, 8f, 6f, 18f, 6f, 23f, 15f);          // 背
+                path.AddLines(new[] { new SD.PointF(23f, 15f), new SD.PointF(30f, 8f), new SD.PointF(27f, 16f),
+                                      new SD.PointF(30f, 24f), new SD.PointF(23f, 17f) });   // 鱼尾
+                path.AddBezier(23f, 17f, 18f, 26f, 8f, 26f, 3f, 16f);        // 肚子
+                path.CloseFigure();
+                path.AddEllipse(7.2f, 12.7f, 3.6f, 3.6f);                   // 眼睛（交替填充 = 镂空）
+                using (var b = new SD.Drawing2D.LinearGradientBrush(new SD.PointF(2, 30), new SD.PointF(30, 2),
+                    SD.Color.FromArgb(255, 77, 107, 254), SD.Color.FromArgb(255, 90, 210, 255)))
+                    g.FillPath(b, path);
+            }
+        }
+
+        /// 托盘里的四个角分别画金星、月牙、小鱼和四芒星。
         public static void Combined(SD.Graphics g)
         {
-            Star(g, 11, 19, 11, SD.Color.FromArgb(255, 255, 196, 64));
-            Scaled(g, Moon, 15, -1, 0.55f);
-            Scaled(g, Gemini, 17.5f, 17.5f, 0.45f);
+            Star(g, 8, 8, 8, SD.Color.FromArgb(255, 255, 196, 64));
+            Scaled(g, Moon, 17, 0, 0.54f);
+            Scaled(g, DeepSeek, -1, 15, 0.58f);
+            Scaled(g, Gemini, 17, 17, 0.47f);
         }
 
         static void Scaled(SD.Graphics g, Action<SD.Graphics> draw, float x, float y, float s)
@@ -217,7 +260,7 @@ namespace AIBootAnimations
             g.Restore(state);
         }
 
-        /// 程序图标（exe、窗口、任务栏）：深靛蓝到紫色的圆角方块（夜空），上面是金色大星（Claude）、月牙（GPT）、蓝紫四芒星（Gemini）
+        /// 程序图标（exe、窗口、任务栏）：深靛蓝到紫色的圆角方块（夜空），上面是 Claude 版的三颗金色小星星
         public static void Logo(SD.Graphics g)
         {
             using (var bg = RoundedRect(1, 1, 30, 30, 7.5f))
@@ -228,9 +271,7 @@ namespace AIBootAnimations
             {
                 g.FillEllipse(dot, 6, 6.5f, 1.3f, 1.3f); g.FillEllipse(dot, 25.5f, 26, 1.2f, 1.2f); g.FillEllipse(dot, 7.5f, 26.5f, 1f, 1f);
             }
-            Star(g, 11.5f, 18.5f, 8, SD.Color.FromArgb(255, 255, 200, 80));
-            Scaled(g, Moon, 16.5f, 3.5f, 0.42f);
-            Scaled(g, Gemini, 17.5f, 16.5f, 0.36f);
+            Scaled(g, Claude, 3.2f, 3.2f, 0.8f);   // 四合一用 Claude 版最早的三颗金色小星星
         }
 
         static SD.Drawing2D.GraphicsPath RoundedRect(float x, float y, float w, float h, float r)
@@ -301,7 +342,7 @@ namespace AIBootAnimations
 
     // ───────────────────────── 设置 ─────────────────────────
 
-    /// 一场播放实际用到的参数：由三个应用共用的设置 + 这个应用自己的动画参数拼出来
+    /// 一场播放实际用到的参数：由四个应用共用的设置 + 这个应用自己的动画参数拼出来
     public class Config
     {
         public bool PlayIntro = true;
@@ -328,11 +369,14 @@ namespace AIBootAnimations
         public double SubtitleFadeSeconds = 0.5;
         public double SubtitleWidthRatio = 0.6;
         public List<Subtitle> Subtitles;
+        // 托盘二级菜单里单独给这个应用调的值；null = 跟着「启动设置」里的总设置走
+        public bool? PlayIntro, LoopBackground;
+        public double? ResidualAlpha, IntroVolume;
 
         public AppSettings(Profile p) { FadeStartSeconds = p.FadeStartSeconds; ShowSubtitles = p.ShowSubtitles; Subtitles = p.MakeSubtitles(); }
     }
 
-    /// 三个应用共用的一份设置：%APPDATA%\AIBootAnimations\settings.json
+    /// 四个应用共用的一份设置：%APPDATA%\AIBootAnimations\settings.json
     public class Settings
     {
         public bool PlayIntro = true;            // 应用启动时播放开屏动画
@@ -361,8 +405,8 @@ namespace AIBootAnimations
             var a = Of(p);
             return new Config
             {
-                PlayIntro = PlayIntro, LoopBackground = LoopBackground,
-                ResidualAlpha = ResidualAlpha, IntroVolume = IntroVolume,
+                PlayIntro = a.PlayIntro ?? PlayIntro, LoopBackground = a.LoopBackground ?? LoopBackground,
+                ResidualAlpha = a.ResidualAlpha ?? ResidualAlpha, IntroVolume = a.IntroVolume ?? IntroVolume,
                 FadeStartSeconds = a.FadeStartSeconds, FadeDurationSeconds = a.FadeDurationSeconds,
                 ShowSubtitles = a.ShowSubtitles, SubtitleFadeSeconds = a.SubtitleFadeSeconds, SubtitleWidthRatio = a.SubtitleWidthRatio,
                 Subtitles = a.Subtitles,
@@ -380,6 +424,15 @@ namespace AIBootAnimations
         {
             object v; if (d.TryGetValue(k, out v) && v is bool) return (bool)v;
             return def;
+        }
+        static bool? NB(Dictionary<string, object> d, string k)
+        {
+            object v; return d.TryGetValue(k, out v) && v is bool ? (bool?)(bool)v : null;
+        }
+        static double? ND(Dictionary<string, object> d, string k, double lo, double hi)
+        {
+            object v; if (!d.TryGetValue(k, out v) || v == null) return null;
+            try { return Clamp(Convert.ToDouble(v, CultureInfo.InvariantCulture), lo, hi); } catch { return null; }
         }
         static string S(Dictionary<string, object> d, string k, string def)
         {
@@ -430,6 +483,8 @@ namespace AIBootAnimations
         static void ReadApp(AppSettings a, Dictionary<string, object> d)
         {
             a.Enabled = B(d, "enabled", a.Enabled);
+            a.PlayIntro = NB(d, "playIntro"); a.LoopBackground = NB(d, "loopBackground");
+            a.ResidualAlpha = ND(d, "residualAlpha", 0, 0.8); a.IntroVolume = ND(d, "introVolume", 0, 1);
             a.FadeStartSeconds = D(d, "fadeStartSeconds", a.FadeStartSeconds);
             a.FadeDurationSeconds = D(d, "fadeDurationSeconds", a.FadeDurationSeconds);
             a.ShowSubtitles = B(d, "showSubtitles", a.ShowSubtitles);
@@ -462,6 +517,7 @@ namespace AIBootAnimations
                     var d = Parse(File.ReadAllText(f, Encoding.UTF8));
                     if (d == null) continue;
                     ReadApp(Of(p), d);
+                    Of(p).PlayIntro = null; Of(p).LoopBackground = null; Of(p).ResidualAlpha = null; Of(p).IntroVolume = null;
                     if (!any)
                     {
                         PlayIntro = B(d, "playIntro", PlayIntro);
@@ -509,6 +565,10 @@ namespace AIBootAnimations
                     var p = profiles[i]; var a = Of(p);
                     sb.Append("    \"" + p.Key + "\" : {\n");
                     sb.Append("      \"enabled\" : " + L(a.Enabled) + ",\n");
+                    if (a.PlayIntro.HasValue) sb.Append("      \"playIntro\" : " + L(a.PlayIntro.Value) + ",\n");
+                    if (a.LoopBackground.HasValue) sb.Append("      \"loopBackground\" : " + L(a.LoopBackground.Value) + ",\n");
+                    if (a.ResidualAlpha.HasValue) sb.Append("      \"residualAlpha\" : " + N(a.ResidualAlpha.Value) + ",\n");
+                    if (a.IntroVolume.HasValue) sb.Append("      \"introVolume\" : " + N(a.IntroVolume.Value) + ",\n");
                     sb.Append("      \"fadeDurationSeconds\" : " + N(a.FadeDurationSeconds) + ",\n");
                     sb.Append("      \"fadeStartSeconds\" : " + N(a.FadeStartSeconds) + ",\n");
                     sb.Append("      \"showSubtitles\" : " + L(a.ShowSubtitles) + ",\n");
@@ -617,6 +677,9 @@ namespace AIBootAnimations
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
         [DllImport("user32.dll")] public static extern bool SetLayeredWindowAttributes(IntPtr h, uint key, byte alpha, uint flags);
+        public delegate void WinEventProc(IntPtr hook, uint ev, IntPtr h, int idObject, int idChild, uint thread, uint time);
+        [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint evMin, uint evMax, IntPtr mod, WinEventProc proc, uint pid, uint tid, uint flags);
+        [DllImport("user32.dll")] public static extern bool UnhookWinEvent(IntPtr hook);
         [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
         [DllImport("shcore.dll")] static extern int SetProcessDpiAwareness(int v);
@@ -731,13 +794,13 @@ namespace AIBootAnimations
         {
             string n;
             if (NameCache.TryGetValue(pid, out n)) return n;
-            try { n = Process.GetProcessById((int)pid).ProcessName; } catch { n = ""; }
+            try { using (var process = Process.GetProcessById((int)pid)) n = process.ProcessName; } catch { n = ""; }
             if (NameCache.Count > 500) NameCache.Clear();
             NameCache[pid] = n;
             return n;
         }
 
-        /// 找某个应用最大的那个可见主窗口。三个都是 Electron 程序，会有好几个进程和隐藏窗口，只挑看得见、够大的顶层窗口
+        /// 找某个应用最大的那个可见主窗口。目标都是 Electron 程序，会有好几个进程和隐藏窗口，只挑看得见、够大的顶层窗口
         public static Target Find(Profile p)
         {
             Target best = new Target(); long bestArea = 0;
@@ -754,11 +817,7 @@ namespace AIBootAnimations
                 else
                 {
                     if (p.RequireChromeClass && Native.ClassOf(h) != "Chrome_WidgetWin_1") return true;
-                    string pn = ProcName(pid);
-                    bool match = false;
-                    foreach (var name in p.ProcessNames)
-                        if (string.Equals(pn, name, StringComparison.OrdinalIgnoreCase)) { match = true; break; }
-                    if (!match) return true;
+                    if (!p.MatchesProcess(ProcName(pid))) return true;
                     if (Native.GetWindowTextLength(h) == 0) return true;
                 }
                 Native.RECT r; if (!Native.Bounds(h, out r)) return true;
@@ -824,11 +883,80 @@ namespace AIBootAnimations
         public static double LoopCutSec = 0;    // --loop-cut 秒：循环段放到这里就提前换播放器，接缝次数成倍增加，几分钟跑完平时几小时的接缝
         public static double StallTestSec = 0;  // --stall-test 秒：每隔这么久故意把正在放的播放器暂停，看自愈能不能接回来
         public static int StallMs = 3000;       // 画面多久没动算卡住
+        public static int StandbyFailEvery = 0; // --standby-fail-test N：每第 N 次换待命播放器时故意给个不存在的文件，测换失败时画面不受影响（#7）
         public static int RecycleEvery = 10;    // --recycle-every 圈：每放这么多圈，把后台待命的播放器换成新的（0 = 不换）
         public static double HeartbeatSec = 600; // --heartbeat 秒：循环背景每隔多久往日志里报一次平安
+        public static double PerfSec = 0;       // --perf-log 秒：每隔这么久往日志里记一次 CPU / 内存（测性能用）
+        // auto 依背景适配选择整窗或逐像素透明。--overlay-mode：浮层怎么做。hosted = 系统分层外壳窗口 + 里面嵌 WPF 画面（原样背景）；
+        // perpixel = 老的 WPF 逐像素透明窗口（只为对比性能）；opaque = 完全不透明（只为测性能下限，画面不对）
+        public static string OverlayMode = "auto";
+    }
+
+    /// 本进程 CPU 占用：两次采样之间用掉的 CPU 时间 ÷ 经过的时间 ÷ 核数，跟任务管理器「CPU」那一列同一个算法
+    public sealed class Perf
+    {
+        TimeSpan lastCpu;
+        DateTime lastWall;
+        public string Sample()
+        {
+            try
+            {
+                using (var p = Process.GetCurrentProcess())
+                {
+                    var cpu = p.TotalProcessorTime; var now = DateTime.UtcNow;
+                    string pct = "";
+                    if (lastWall != DateTime.MinValue)
+                    {
+                        double wall = (now - lastWall).TotalMilliseconds;
+                        if (wall > 0) pct = (100.0 * (cpu - lastCpu).TotalMilliseconds / wall / Environment.ProcessorCount).ToString("0.0", CultureInfo.InvariantCulture) + "%";
+                    }
+                    lastCpu = cpu; lastWall = now;
+                    return "CPU " + (pct == "" ? "（首次采样）" : pct) + "，内存 " + (p.WorkingSet64 / 1048576) + "MB（私有 " + (p.PrivateMemorySize64 / 1048576) + "MB），句柄 " + p.HandleCount;
+                }
+            }
+            catch (Exception ex) { return "性能采样失败：" + ex.Message; }
+        }
     }
 
     // ───────────────────────── 一次播放 ─────────────────────────
+
+    /// 浮层的外壳：系统自己的分层窗口，整窗透明度用 SetLayeredWindowAttributes 交给桌面合成器在显卡上混合；
+    /// WPF 画面嵌在里面当子窗口，照常用显卡画。
+    /// 不直接用 WPF 窗口：WPF 的窗口要半透明只能开逐像素透明（每帧把整块画面拷回内存、CPU 混合，#9 的 CPU 20%+ 就是它），
+    /// 自己给 WPF 窗口加分层样式又会被 WPF 当场拿掉
+    public class HostForm : WF.Form
+    {
+        public bool ClickThrough;
+        public delegate IntPtr MsgHook(IntPtr h, int msg, IntPtr w, IntPtr l, ref bool handled);
+        public MsgHook OnMsg;
+        readonly Action<string> log;
+        public HostForm(string title, Action<string> log)
+        {
+            this.log = log;
+            FormBorderStyle = WF.FormBorderStyle.None; ShowInTaskbar = false; BackColor = SD.Color.Black;
+            StartPosition = WF.FormStartPosition.Manual; Location = new SD.Point(-32000, -32000); Size = new SD.Size(10, 10); Text = title;
+        }
+        protected override bool ShowWithoutActivation { get { return true; } }
+        protected override WF.CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.Style = unchecked((int)0x80000000) | 0x02000000;   // WS_POPUP | WS_CLIPCHILDREN
+                cp.ExStyle = (cp.ExStyle | 0x80000 /*LAYERED*/ | 0x80 /*TOOLWINDOW*/ | 0x8000000 /*NOACTIVATE*/ | (ClickThrough ? 0x20 : 0)) & ~0x40000 /*APPWINDOW*/;
+                return cp;
+            }
+        }
+        protected override void WndProc(ref WF.Message m)
+        {
+            if (OnMsg != null)
+            {
+                bool handled = false;
+                try { OnMsg(m.HWnd, m.Msg, m.WParam, m.LParam, ref handled); } catch (Exception ex) { log("浮层消息处理出错：" + ex.Message); }
+            }
+            base.WndProc(ref m);
+        }
+    }
 
     public class Show
     {
@@ -836,13 +964,15 @@ namespace AIBootAnimations
         Phase phase = Phase.Intro;
 
         public readonly Target Target;
-        readonly Profile profile;             // 合并版：这一场属于哪个应用（素材、日志前缀、浮层标题）
         Config config;
-        readonly bool withIntro;
+        readonly Profile profile;
+        readonly Perf heartbeatPerf = new Perf();
+        ContrastEffect fx;
         readonly Action onDone;
 
-        Window overlay, top;
-        IntPtr overlayH, topH;
+        Window overlay;
+        IntPtr overlayH;
+        HostForm host; HwndSource childSrc; IntPtr childH;   // Hosted 模式：外壳窗口和里面的 WPF 画面
         Grid grid, root;
         int styleFixes;
         MediaElement intro, loopA, loopB, activeLoop;
@@ -875,7 +1005,6 @@ namespace AIBootAnimations
         int displayState = -1;
 
         SubtitleElement sub;
-        Border skipBtn;
         DispatcherTimer tick;
         int currentSub = -1;
         bool introGone, hidden;
@@ -886,18 +1015,14 @@ namespace AIBootAnimations
         bool clickThrough;
         // 开屏音量渐变
         double volFrom, volTo; DateTime volT0; double volDur = -1;
-        // 循环背景的对比度适配（合并版新增，只在循环背景阶段挂上）
-        ContrastEffect fx;
 
         string Asset(string name) { return Path.Combine(profile.AssetsDir, name); }
-
-        /// 日志带上应用名，三个应用写同一份日志也分得清
         void L(string msg) { Log.W("[" + profile.AppName + "] " + msg); }
 
         public Show(Profile p, Target t, Config c, bool withIntro, Action onDone)
         {
-            profile = p; Target = t; config = c; this.withIntro = withIntro; this.onDone = onDone;
-            disp = Dispatcher.CurrentDispatcher;   // 窗口一建好就可能收到 DPI 变化通知，要先有它
+            profile = p; Target = t; config = c; this.onDone = onDone;
+            disp = Dispatcher.CurrentDispatcher;
 
             grid = new Grid { Background = withIntro ? Brushes.Black : Brushes.Transparent, ClipToBounds = true };
             // 有 loop-x2.mp4（循环段连放两遍）就用「重叠交接」；
@@ -924,49 +1049,25 @@ namespace AIBootAnimations
             }
             else introGone = true;
 
-            // 一个窗口三层：最下面视频（整体调透明度做半透明背景），上面字幕和「跳过」（不跟着变淡）
-            root = new Grid { Background = Brushes.Transparent };
+            // 视频和字幕共用同一个可移动的 WPF 根元素。
+            root = new Grid { Background = Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top }; // 位置大小由 PlaceContent 按目标窗口定
             root.Children.Add(grid);
-            overlay = new Window
-            {
-                WindowStyle = WindowStyle.None, AllowsTransparency = true, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false,
-                ShowActivated = false, Background = Brushes.Transparent, Content = root,
-                Left = -32000, Top = -32000, Width = 10, Height = 10, Title = profile.OverlayTitle
-            };
-            // 浮层窗口被外部关掉（比如别的程序发了关闭消息）：这一场直接收工，不再对着已经没了的窗口补样式
-            overlay.Closed += delegate { if (phase != Phase.Done) { L("浮层窗口被关掉了，收工"); Teardown(); } };
             clickThrough = !withIntro;
             alpha = 0; // 开屏也从透明淡入（0.3 秒），不再一出现就整块黑屏盖上去
-            grid.Opacity = alpha;
-            overlay.SourceInitialized += delegate
-            {
-                overlayH = new WindowInteropHelper(overlay).Handle;
-                EnsureOverlayStyle(true);
-                // 收系统的睡眠唤醒、显示器亮灭通知（这两种之后视频画面最容易冻住）
-                var hs = HwndSource.FromHwnd(overlayH);
-                if (hs != null) hs.AddHook(WndProc);
-                try { Guid g = Native.GUID_CONSOLE_DISPLAY_STATE; powerNotify = Native.RegisterPowerSettingNotification(overlayH, ref g, 0); }
-                catch (Exception ex) { L("显示器亮灭通知注册失败：" + ex.Message); }
-                // 设成目标窗口的「附属窗口」：系统自动让它一直在目标窗口上面，目标窗口被别的窗口挡住时它也一起被挡住
-                Native.SetLong(overlayH, Native.GWLP_HWNDPARENT, Target.Hwnd.ToInt64());
-            };
-
             if (withIntro)
             {
-                var topGrid = root;
                 sub = new SubtitleElement { WidthRatio = config.SubtitleWidthRatio };
                 if (config.Subtitles.Count > 0) sub.RefText = config.Subtitles[0].Text;
-                topGrid.Children.Add(sub);
-                // 合并版：不再显示右上角的「跳过」，开屏时在画面上任意位置点一下就跳过
-                //（进入循环背景后浮层是点击穿透的，点击直接落到应用上，不会误触）
-                root.MouseLeftButtonUp += delegate { if (phase == Phase.Intro) SkipIntro(); };
+                root.Children.Add(sub);
+                root.MouseLeftButtonUp += delegate { SkipIntro(); };
             }
 
-            overlay.Show();
-            EnsureOverlayStyle(true); // WPF 显示窗口时会重写扩展样式，显示后再补一次
-            if (top != null) top.Show();
+            CreateSurface();
+            waitFrame = !withIntro && !PerPixel;
             Follow(true);
-            L("浮层样式 0x" + Native.GetLong(overlayH, Native.GWL_EXSTYLE).ToString("X"));
+            if (phase == Phase.Done) return;
+            long st = Native.GetLong(overlayH, Native.GWL_EXSTYLE);
+            L("浮层样式 0x" + st.ToString("X") + " layered=" + ((st & Native.WS_EX_LAYERED) != 0 ? 1 : 0) + " mode=" + surfaceMode);
 
             if (withIntro)
             {
@@ -984,7 +1085,6 @@ namespace AIBootAnimations
             }
 
             // 解锁、远程桌面切回、换显示器 / 改分辨率之后，重建一次播放器
-            disp = Dispatcher.CurrentDispatcher;
             onSession = delegate (object s, SessionSwitchEventArgs e)
             {
                 var r = e.Reason;
@@ -997,17 +1097,167 @@ namespace AIBootAnimations
             nextBeatMs = (long)(Dev.HeartbeatSec * 1000);
             nextStallTestMs = (long)(Dev.StallTestSec * 1000);
 
+            // 跟窗口：不再每 15 毫秒去问一次窗口在哪，改成让系统在目标窗口移动、缩放、最小化、隐藏时通知我们，马上跟上
+            winEvent = OnWinEvent;
+            foreach (var rng in new[] { new uint[] { 0x0016, 0x0017 } /*最小化开始/结束*/, new uint[] { 0x8002, 0x8003 } /*显示/隐藏*/,
+                                      new uint[] { 0x800B, 0x800B } /*位置变了*/, new uint[] { 0x8017, 0x8018 } /*被系统藏起/放出*/ })
+            {
+                IntPtr hk = Native.SetWinEventHook(rng[0], rng[1], IntPtr.Zero, winEvent, Target.Pid, 0, 0 /*WINEVENT_OUTOFCONTEXT*/);
+                if (hk != IntPtr.Zero) hooks.Add(hk);
+            }
+            if (hooks.Count < 4) L("窗口事件通知只挂上 " + hooks.Count + "/4 个，靠定时检查兜底");
+
+            // 定时器只做杂事（交接、自愈、渐变、字幕）：要掐时间的时候 15 毫秒一次，平时 100 毫秒一次
             tick = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(15) };
             tick.Tick += delegate { Tick(); };
             tick.Start();
+        }
+
+        string surfaceMode;
+        bool PerPixel { get { return surfaceMode == "perpixel"; } }
+        bool Hosted { get { return surfaceMode == "hosted"; } }
+
+        string SurfaceMode()
+        {
+            if (Dev.OverlayMode != "auto") return Dev.OverlayMode;
+            // 黑底的原生外壳只能混合整窗。着色器抠出的透明像素需要逐像素合成。
+            bool needsMask = config.ContrastOn && (config.LoopBackground || clickThrough);
+            return needsMask && ContrastEffect.Shader != null ? "perpixel" : "hosted";
+        }
+
+        void CreateSurface()
+        {
+            surfaceMode = SurfaceMode();
+            appliedAlpha = -1;
+            styleFixes = 0;
+            grid.Opacity = PerPixel ? alpha : 1;
+            if (Hosted)
+            {
+                host = new HostForm(profile.OverlayTitle, L) { ClickThrough = clickThrough };
+                host.OnMsg = WndProc;
+                host.FormClosed += OnHostClosed;
+                overlayH = host.Handle;          // 这一步建出窗口
+                ApplyAlpha(true);                // 分层窗口建好后先设成全透明，不然在设之前是看不见也点不到的状态
+                InitOverlayHandle();
+                childSrc = new HwndSource(new HwndSourceParameters(profile.OverlayTitle)
+                {
+                    ParentWindow = overlayH, WindowStyle = 0x50000000 /*WS_CHILD | WS_VISIBLE*/, PositionX = 0, PositionY = 0, Width = 10, Height = 10
+                });
+                childSrc.CompositionTarget.BackgroundColor = Colors.Black;
+                childSrc.RootVisual = root;
+                childH = childSrc.Handle;
+            }
+            else
+            {
+                overlay = new Window
+                {
+                    WindowStyle = WindowStyle.None, AllowsTransparency = PerPixel, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false,
+                    ShowActivated = false, Background = PerPixel ? Brushes.Transparent : Brushes.Black, Content = root,
+                    Left = -32000, Top = -32000, Width = 10, Height = 10, Title = profile.OverlayTitle
+                };
+                overlay.Closed += OnOverlayClosed;
+                overlay.SourceInitialized += delegate
+                {
+                    overlayH = new WindowInteropHelper(overlay).Handle;
+                    EnsureOverlayStyle(true);
+                    var hs = HwndSource.FromHwnd(overlayH);
+                    if (hs != null) hs.AddHook(WndProc);
+                    InitOverlayHandle();
+                };
+            }
+
+            if (host != null) host.Show(); else overlay.Show();
+            EnsureOverlayStyle(true);
+            if (hidden) ShowAll(false);
+        }
+
+        void OnHostClosed(object sender, WF.FormClosedEventArgs e)
+        {
+            host.OnMsg = null;
+            host = null; // Form.Close 会在事件返回后释放外壳。
+            SurfaceClosed();
+        }
+        void OnOverlayClosed(object sender, EventArgs e)
+        {
+            // Closed 回调里不再对同一个 WPF 窗口调用 Close。
+            overlay = null;
+            SurfaceClosed();
+        }
+        void SurfaceClosed()
+        {
+            if (phase == Phase.Done) return;
+            L("浮层窗口被关掉了，收工");
+            Teardown();
+        }
+
+        void CloseSurface()
+        {
+            if (powerNotify != IntPtr.Zero) { Native.UnregisterPowerSettingNotification(powerNotify); powerNotify = IntPtr.Zero; }
+            if (childSrc != null)
+            {
+                if (!childSrc.IsDisposed) { childSrc.RootVisual = null; childSrc.Dispose(); }
+                childSrc = null;
+            }
+            childH = overlayH = IntPtr.Zero;
+            if (host != null)
+            {
+                host.OnMsg = null;
+                host.FormClosed -= OnHostClosed;
+                host.Dispose();
+                host = null;
+            }
+            if (overlay != null)
+            {
+                overlay.Closed -= OnOverlayClosed;
+                overlay.Content = null;
+                overlay.Close();
+                overlay = null;
+            }
+        }
+
+        readonly List<IntPtr> hooks = new List<IntPtr>();
+        Native.WinEventProc winEvent;   // 留着引用，不然被回收后系统回调会崩
+        bool waitFrame;
+
+        void OnWinEvent(IntPtr hook, uint ev, IntPtr h, int idObject, int idChild, uint thread, uint time)
+        {
+            if (overlayH == IntPtr.Zero || h != Target.Hwnd || idObject != 0 /*OBJID_WINDOW*/ || idChild != 0 || phase == Phase.Done) return;
+            try { Follow(false); } catch (Exception ex) { L("跟随窗口出错：" + ex.Message); }
+        }
+
+        /// 现在是不是要掐时间：开屏、渐变、接缝、交接快到点、重建中——这些时候定时器跑快档
+        bool Busy()
+        {
+            if (paused) return alphaDur >= 0 || volDur >= 0;
+            if (!introGone || alphaDur >= 0 || volDur >= 0 || swapFrom != null || handTo != null || retiring != null || pendingAt > 0 || waitFrame) return true;
+            if (overlapLoop && activeLoop != null && !paused && activeLoop.NaturalDuration.HasTimeSpan)
+            {
+                double half = activeLoop.NaturalDuration.TimeSpan.TotalSeconds / 2, pos = activeLoop.Position.TotalSeconds;
+                if (pos >= half - handLead - 0.3) return true;
+            }
+            if (!overlapLoop && activeLoop != null && activeLoop.NaturalDuration.HasTimeSpan
+                && activeLoop.Position.TotalSeconds >= activeLoop.NaturalDuration.TimeSpan.TotalSeconds - 0.3) return true;
+            return Dev.LoopCutSec > 0;
+        }
+
+        /// 浮层窗口建好后：收系统的睡眠唤醒、显示器亮灭通知（这两种之后视频画面最容易冻住），
+        /// 并设成目标窗口的「附属窗口」：系统自动让它一直在目标窗口上面，目标窗口被别的窗口挡住时它也一起被挡住
+        void InitOverlayHandle()
+        {
+            try { Guid g = Native.GUID_CONSOLE_DISPLAY_STATE; powerNotify = Native.RegisterPowerSettingNotification(overlayH, ref g, 0); }
+            catch (Exception ex) { L("显示器亮灭通知注册失败：" + ex.Message); }
+            Native.SetLong(overlayH, Native.GWLP_HWNDPARENT, Target.Hwnd.ToInt64());
         }
 
         IntPtr WndProc(IntPtr h, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             if (msg == 0x02E0 /*WM_DPICHANGED*/)
             {
-                // 浮层跨到缩放不同的屏幕：WPF 会按系统建议改窗口大小，处理完以后马上按目标窗口重新摆一次
-                if (disp != null) disp.BeginInvoke(new Action(delegate { if (phase != Phase.Done) Follow(true); }));
+                // 浮层换到另一块缩放不同的屏（#7：主屏 150%、副屏 125%）：WPF 可能按系统建议改掉浮层大小，
+                // 等它处理完，再按新缩放把浮层和视频摆回目标窗口位置，免得背景变小或错位到窗口再动一下才好
+                int dpi = (int)(wParam.ToInt64() & 0xFFFF);
+                L("浮层换到缩放 " + (dpi * 100 / 96) + "% 的屏，重新摆放");
+                disp.BeginInvoke(new Action(delegate { if (phase != Phase.Done && overlayH != IntPtr.Zero) Follow(true); }));
                 return IntPtr.Zero;
             }
             if (msg != 0x218 /*WM_POWERBROADCAST*/) return IntPtr.Zero;
@@ -1070,15 +1320,30 @@ namespace AIBootAnimations
         void OnLoopEnded(object s, RoutedEventArgs e)
         {
             var m = s as MediaElement;
-            if (m == null || m != activeLoop || phase == Phase.Done) return; // 已经换下去的、或已经重建掉的旧播放器，不理它
+            if (m == null || m != activeLoop || paused || phase == Phase.Done || phase == Phase.Ending) return; // 已经换下去的、或已经重建掉的旧播放器，不理它
             SwapLoop(m, OtherLoop(m));
         }
 
         void OnLoopFailed(object s, ExceptionRoutedEventArgs e)
         {
             if (s != loopA && s != loopB) return;
-            L("循环背景播放器报错：" + (e.ErrorException != null ? e.ErrorException.Message : "未知"));
-            LaterRebuild("播放器报错", 500);
+            var m = (MediaElement)s;
+            bool onStage = m == activeLoop || m == handTo || m == swapTo || m == swapFrom;
+            L("循环背景播放器报错（" + (onStage ? "正在放的" : "待命的") + "）：" + ErrStr(e));
+            // 正在放的坏了才整个重建；待命的坏了只换待命的，正在放的不受影响（#7：以前待命的一报错就重建，画面会停一下或消失几秒）
+            if (onStage) LaterRebuild("播放器报错", 500);
+            else disp.BeginInvoke(new Action(delegate
+            {
+                if (phase != Phase.Done && phase != Phase.Ending && (m == loopA || m == loopB)
+                    && m != activeLoop && m != handTo && m != swapTo && m != swapFrom) ReplaceStandby(m);
+            }));
+        }
+
+        static string ErrStr(ExceptionRoutedEventArgs e)
+        {
+            var x = e.ErrorException;
+            if (x == null) return "未知";
+            return x.GetType().Name + " 0x" + x.HResult.ToString("X8") + " " + x.Message;
         }
 
         /// 关掉一个播放器并从画面里拿走
@@ -1128,8 +1393,11 @@ namespace AIBootAnimations
             swapFrom = null; swapTo = null;
             if (from == intro)
             {
-                intro.Visibility = Visibility.Collapsed;
-                intro.Stop(); intro.Close();
+                // 开屏 0.25 秒淡出再关（跟重建时撤旧画面一样）。以前一下子收掉，云端录屏偶尔在这一刻漏出一帧黑
+                var iv = intro;
+                var fade = new DoubleAnimation(0, TimeSpan.FromSeconds(0.25));
+                fade.Completed += delegate { iv.Visibility = Visibility.Collapsed; iv.Stop(); iv.Close(); };
+                iv.BeginAnimation(UIElement.OpacityProperty, fade);
                 return;
             }
             Promote(from, to);
@@ -1148,7 +1416,7 @@ namespace AIBootAnimations
         // 每帧检查重叠交接（只在有 loop-x2.mp4 时）
         void CheckHandoff()
         {
-            if (!overlapLoop || phase == Phase.Done || !introGone || swapFrom != null || activeLoop == null) return;
+            if (paused || !overlapLoop || phase == Phase.Done || !introGone || swapFrom != null || activeLoop == null) return;
             if (handFrom != null && handFrom != activeLoop) { handFrom = null; handTo = null; } // 被重建 / 老办法接走了
             var cur = activeLoop;
             if (!cur.NaturalDuration.HasTimeSpan) return;
@@ -1182,13 +1450,59 @@ namespace AIBootAnimations
 
         /// 后台待命的那个播放器定期换成新的：同一个播放器暂停、倒回、再放成百上千次，不让它一直用下去。
         /// 它此刻垫在下面看不见，换掉不影响画面；新的自己会停在第一帧等着
+        // #7：新播放器偶尔打不开（报「找不到媒体文件」）。以前是先换上去再说，它一报错就整个重建，画面停一下或消失几秒。
+        // 现在旧的照常留着待命，新的打开成功才顶替它；打不开就扔掉新的，旧的继续用，画面完全不受影响
+        MediaElement candidate, candidateFor;   // 正在打开、还没顶上去的新待命播放器，和它要顶替的那个
+        int standbyReplaces, standbyFails;
+
         void ReplaceStandby(MediaElement old)
         {
-            var fresh = MakeLoopPlayer();
-            Panel.SetZIndex(fresh, 0);
+            DropCandidate();
+            standbyReplaces++;
+            bool inject = Dev.StandbyFailEvery > 0 && standbyReplaces % Dev.StandbyFailEvery == 0;
+            var fresh = MakePlayer(inject ? "__standby-fail-test__.mp4" : loopFile, true);
+            fresh.MediaOpened += OnCandidateOpened;
+            fresh.MediaFailed += OnCandidateFailed;
+            Panel.SetZIndex(fresh, -1);
             grid.Children.Add(fresh);
+            candidate = fresh; candidateFor = old;
+            try { old.Pause(); old.Position = TimeSpan.Zero; } catch { } // 旧的先照常退回第一帧待命
+        }
+
+        void OnCandidateOpened(object s, RoutedEventArgs e)
+        {
+            var fresh = s as MediaElement;
+            if (fresh == null || fresh != candidate) return;
+            var old = candidateFor;
+            candidate = null; candidateFor = null;
+            fresh.MediaOpened -= OnCandidateOpened; fresh.MediaFailed -= OnCandidateFailed;
+            // 旧的这会儿已经上场（正在放、正在交接）或已经被重建换掉：不顶替了，扔掉新的，下次再换
+            if (phase == Phase.Done || (old != loopA && old != loopB) || old == activeLoop || old == handTo || old == swapTo || old == swapFrom || old == retiring)
+            { DisposePlayer(fresh); return; }
+            fresh.MediaEnded += OnLoopEnded; fresh.MediaFailed += OnLoopFailed;
+            Panel.SetZIndex(fresh, 0);
             if (old == loopA) loopA = fresh; else loopB = fresh;
             DisposePlayer(old);
+            standbyFails = 0;
+        }
+
+        void OnCandidateFailed(object s, ExceptionRoutedEventArgs e)
+        {
+            var fresh = s as MediaElement;
+            if (fresh == null || fresh != candidate) return;
+            candidate = null; candidateFor = null;
+            fresh.MediaOpened -= OnCandidateOpened; fresh.MediaFailed -= OnCandidateFailed;
+            standbyFails++;
+            L("待命播放器没换成（" + ErrStr(e) + "），旧的继续用，画面不受影响（连续第 " + standbyFails + " 次，已循环 " + laps + " 圈）");
+            disp.BeginInvoke(new Action(delegate { DisposePlayer(fresh); }));
+        }
+
+        void DropCandidate()
+        {
+            if (candidate == null) return;
+            var c = candidate; candidate = null; candidateFor = null;
+            c.MediaOpened -= OnCandidateOpened; c.MediaFailed -= OnCandidateFailed;
+            DisposePlayer(c);
         }
 
         // ── 自愈 ──
@@ -1197,7 +1511,7 @@ namespace AIBootAnimations
         void LaterRebuild(string why) { LaterRebuild(why, 2000); }
         void LaterRebuild(string why, int delayMs)
         {
-            if (phase == Phase.Done) return;
+            if (phase == Phase.Done || phase == Phase.Ending) return;
             pendingWhy = why;
             pendingAt = clock.ElapsedMilliseconds + delayMs;
         }
@@ -1211,6 +1525,7 @@ namespace AIBootAnimations
             long now = clock.ElapsedMilliseconds;
             long gap = failStreak < 3 ? 8000 : 60000;
             if (lastRecoverMs >= 0 && now - lastRecoverMs < gap) return false;
+            DropCandidate();
             failStreak++;
             recoveries++; lastRecoverMs = now;
             double p = -1;
@@ -1243,7 +1558,7 @@ namespace AIBootAnimations
 
         void CheckRetire(long now)
         {
-            if (retiring == null) return;
+            if (retiring == null || paused) return;
             // 新播放器稳稳走过 1 秒才撤旧画面，而且 0.25 秒淡出、不是一下拿掉。
             // 云端实测：新播放器进度刚过 0.3 秒时画面还会黑一两帧，那时撤掉旧画面就闪黑；以前 2.5 秒没动也照撤，撤完是一块空白
             if (activeLoop.Position.TotalSeconds < 1.0 && now - retireT0 < 20000) return;
@@ -1260,18 +1575,16 @@ namespace AIBootAnimations
             nextSampleMs = now + 250;
             bool timerGap = lastSampleMs > 0 && now - lastSampleMs > 2000; // 电脑睡眠、整个程序卡住时计时器没跑，那段不算画面卡住
             lastSampleMs = now;
-            if (timerGap || phase != Phase.Revealed || !introGone || hidden || activeLoop == null)
+            if (timerGap || paused || phase != Phase.Revealed || !introGone || hidden || activeLoop == null)
             {
-                lastMoveMs = now; lastPos = -1; // 藏着、还在开屏时不算；回来后重新计时
+                lastMoveMs = now; lastPos = -1; // 藏着、暂停着、还在开屏时不算；回来后重新计时
                 return;
             }
             double p = activeLoop.Position.TotalSeconds;
             if (now >= nextBeatMs)
             {
                 nextBeatMs = now + (long)(Math.Max(1, Dev.HeartbeatSec) * 1000);
-                string mem = "";
-                try { using (var pr = Process.GetCurrentProcess()) mem = "，内存 " + (pr.WorkingSet64 / 1048576) + "MB，句柄 " + pr.HandleCount; } catch { }
-                L("循环背景运行中：已循环 " + laps + " 圈，自动恢复 " + recoveries + " 次，进度 " + p.ToString("0.00", CultureInfo.InvariantCulture) + " 秒" + mem);
+                L("循环背景运行中：已循环 " + laps + " 圈，自动恢复 " + recoveries + " 次，进度 " + p.ToString("0.00", CultureInfo.InvariantCulture) + " 秒，" + heartbeatPerf.Sample());
             }
             if (Math.Abs(p - lastPos) > 0.0005)
             {
@@ -1297,7 +1610,7 @@ namespace AIBootAnimations
         /// 开发用：提前换播放器（--loop-cut）、故意制造卡住（--stall-test）
         void DevHooks(long now)
         {
-            if (phase != Phase.Revealed || !introGone || activeLoop == null) return;
+            if (paused || phase != Phase.Revealed || !introGone || activeLoop == null) return;
             if (Dev.LoopCutSec > 0 && !overlapLoop && swapFrom == null && activeLoop.Position.TotalSeconds >= Dev.LoopCutSec)
                 SwapLoop(activeLoop, OtherLoop(activeLoop));
             if (Dev.StallTestSec > 0 && now >= nextStallTestMs)
@@ -1310,22 +1623,16 @@ namespace AIBootAnimations
 
         void IntroEnded()
         {
-            if (introGone) return;
+            if (introGone || phase == Phase.Done || phase == Phase.Ending) return;
             introGone = true;
             L("开屏放完，接循环段");
             loopA.Play();
             activeLoop = loopA;
             BeginSwap(intro, loopA); // 开屏停在最后一帧盖着，循环段动起来再撤
             if (phase == Phase.Intro) Reveal(false);
-            CloseTop();
         }
 
-        void CloseTop()
-        {
-            if (skipBtn != null) skipBtn.Visibility = Visibility.Collapsed;
-        }
-
-        // ── 每 15ms：跟随窗口、字幕、渐变 ──
+        // ── 定时检查窗口、字幕、渐变和播放器状态 ──
         void Tick()
         {
             if (phase == Phase.Done) return;
@@ -1337,7 +1644,7 @@ namespace AIBootAnimations
             long now = clock.ElapsedMilliseconds;
             CheckRetire(now);
             DevHooks(now);
-            if (pendingAt > 0 && now >= pendingAt && !hidden && phase == Phase.Revealed && introGone)
+            if (pendingAt > 0 && now >= pendingAt && !hidden && !paused && phase == Phase.Revealed && introGone) // 暂停时先不重建，继续播放后再补
             {
                 pendingAt = RebuildLoops(pendingWhy) ? 0 : now + 1000; // 被退避挡住就过一秒再问
             }
@@ -1349,7 +1656,13 @@ namespace AIBootAnimations
                 if (phase == Phase.Intro && t >= config.FadeStartSeconds) Reveal(false);
                 UpdateSubtitle(t);
             }
-            if (alphaDur >= 0)
+            if (waitFrame)
+            {
+                // 视频还没出第一帧：保持全透明、渐变先不开始计时
+                if (activeLoop != null && activeLoop.Position.TotalSeconds > 0.05) { waitFrame = false; alphaT0 = DateTime.Now; }
+                else alphaT0 = DateTime.Now;
+            }
+            if (alphaDur >= 0 && !waitFrame)
             {
                 double k = alphaDur <= 0 ? 1 : Math.Min(1, (DateTime.Now - alphaT0).TotalSeconds / alphaDur);
                 k = k * k * (3 - 2 * k);
@@ -1362,10 +1675,12 @@ namespace AIBootAnimations
                 intro.Volume = volFrom + (volTo - volFrom) * k;
                 if (k >= 1) volDur = -1;
             }
-            if (fx != null) fx.Mix = MixFor();
+            if (phase == Phase.Done) return;
+            var want = TimeSpan.FromMilliseconds(Busy() ? 15 : 100);
+            if (tick.Interval != want) tick.Interval = want;
         }
 
-        /// 跟着目标窗口移动、缩放；目标应用最小化或藏到托盘时一起藏起来；目标应用关了就收工
+        /// 跟着 目标应用窗口移动、缩放；目标应用 最小化或藏到托盘时一起藏起来；目标应用 关了就收工
         void Follow(bool force)
         {
             if (!Native.IsWindow(Target.Hwnd))
@@ -1382,33 +1697,70 @@ namespace AIBootAnimations
             if (hidden)
             {
                 hidden = false; ShowAll(true); force = true;
-                // 循环背景阶段：先透明再 0.35 秒淡回去，盖住 Claude 还原动画和视频层刚恢复时的那一下
+                // 循环背景阶段：先透明再 0.35 秒淡回去，盖住 目标应用还原动画和视频层刚恢复时的那一下
                 if (phase == Phase.Revealed && alphaDur < 0) { SetAlpha(0); RampAlpha(config.ResidualAlpha, 0.35, null); }
             }
             Native.RECT r;
             if (!Native.Bounds(Target.Hwnd, out r)) return;
-            if (!force && SameRect(r, lastRect))
+            // 浮层被改了大小（换到缩放不同的屏时 WPF 可能按系统建议改它），或浮层所在屏的缩放变了：强制重摆一次（#7）。
+            // 不只靠 WM_DPICHANGED：实测单屏改缩放时那条消息没到我们这里
+            if (!force && overlayH != IntPtr.Zero && overlayBox.Right > overlayBox.Left && SameRect(r, lastRect))
             {
-                // 目标窗口没动，再核对一下浮层自己的位置：跨屏幕时系统按 DPI 改过浮层大小、或者被别的原因挪开了，就拉回来
-                Native.RECT o;
-                if (overlayH == IntPtr.Zero || !Native.GetWindowRect(overlayH, out o) || SameRect(o, r)) return;
+                Native.RECT cur;
+                double sc = CurrentScale();
+                bool moved = Native.GetWindowRect(overlayH, out cur) && !SameRect(cur, overlayBox);
+                if (moved || Math.Abs(sc - placedScale) > 0.001)
+                {
+                    L("浮层" + (moved ? "大小被改动" : "所在屏缩放变了") + "，按 " + Math.Round(100 / sc) + "% 重新摆放");
+                    force = true;
+                }
             }
+            if (!force && SameRect(r, lastRect)) return;
             lastRect = r;
-            uint f = Native.SWP_NOZORDER | Native.SWP_NOACTIVATE | Native.SWP_NOOWNERZORDER;
-            if (overlayH != IntPtr.Zero) Native.SetWindowPos(overlayH, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, f);
-            if (topH != IntPtr.Zero) Native.SetWindowPos(topH, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, f);
+            // 浮层就是目标窗口那么大、摆在同一个位置。
+            // 测试版曾让浮层铺满整块屏来躲还原时的闪黑（#6），但一块屏那么大的窗口会被 Windows 当成「有程序在全屏」：
+            // 任务栏被压到下面、通知区图标一闪一闪，拖到另一块屏时还要整块重建，背景会停住或消失几秒（#7）。
+            // 现在浮层不是逐像素透明窗口了，改大小不再整块重画，跟着窗口一起改就行
+            Native.RECT box = r;
+            if (force || !SameRect(box, overlayBox))
+            {
+                overlayBox = box;
+                uint f = Native.SWP_NOZORDER | Native.SWP_NOACTIVATE | Native.SWP_NOOWNERZORDER;
+                if (overlayH != IntPtr.Zero) Native.SetWindowPos(overlayH, IntPtr.Zero, box.Left, box.Top, box.Right - box.Left, box.Bottom - box.Top, f);
+                if (childH != IntPtr.Zero) Native.SetWindowPos(childH, IntPtr.Zero, 0, 0, box.Right - box.Left, box.Bottom - box.Top, f);
+            }
+            PlaceContent(r, box);
         }
 
-        static bool SameRect(Native.RECT a, Native.RECT b)
+        Native.RECT overlayBox;
+        PresentationSource Src()
         {
-            return a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom;
+            if (childSrc != null) return childSrc;
+            return overlay == null ? null : PresentationSource.FromVisual(overlay);
+        }
+        double placedScale = 1;
+        double CurrentScale()
+        {
+            var src = Src();
+            return src != null && src.CompositionTarget != null ? src.CompositionTarget.TransformFromDevice.M11 : 1;
+        }
+        static bool SameRect(Native.RECT a, Native.RECT b) { return a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom; }
+
+        /// 把视频和字幕摆到 目标应用窗口在浮层里的位置（物理像素换成 WPF 的逻辑单位）
+        void PlaceContent(Native.RECT r, Native.RECT box)
+        {
+            var src = Src();
+            Matrix m = src != null && src.CompositionTarget != null ? src.CompositionTarget.TransformFromDevice : Matrix.Identity;
+            placedScale = m.M11;
+            root.Margin = new Thickness((r.Left - box.Left) * m.M11, (r.Top - box.Top) * m.M22, 0, 0);
+            root.Width = Math.Max(1, (r.Right - r.Left) * m.M11);
+            root.Height = Math.Max(1, (r.Bottom - r.Top) * m.M22);
         }
 
         void ShowAll(bool show)
         {
             int cmd = show ? 4 /*SW_SHOWNOACTIVATE*/ : 0 /*SW_HIDE*/;
             if (overlayH != IntPtr.Zero) Native.ShowWindow(overlayH, cmd);
-            if (topH != IntPtr.Zero) Native.ShowWindow(topH, cmd);
         }
 
         /// 分层（整窗半透明）+ 不出现在任务栏 + 不抢焦点；透出后再加点击穿透。被冲掉就补回来
@@ -1417,18 +1769,37 @@ namespace AIBootAnimations
             if (overlayH == IntPtr.Zero) return;
             long ex = Native.GetLong(overlayH, Native.GWL_EXSTYLE);
             long want = (ex | Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE) & ~Native.WS_EX_APPWINDOW;
-            if (clickThrough) want |= Native.WS_EX_TRANSPARENT;
-            if (want != ex && styleFixes < 20)
+            if (Hosted)
             {
-                if (!force) { styleFixes++; L("浮层样式被改过，已补回 0x" + ex.ToString("X") + " → 0x" + want.ToString("X")); }
+                if (host != null) host.ClickThrough = clickThrough;
+                want |= Native.WS_EX_LAYERED;
+            }
+            if (clickThrough) want |= Native.WS_EX_TRANSPARENT;
+            if (want != ex && (styleFixes < 20 || (Hosted && (ex & Native.WS_EX_LAYERED) == 0)))
+            {
+                if (!force) { styleFixes++; if (styleFixes <= 20) L("浮层样式被改过，已补回 0x" + ex.ToString("X") + " → 0x" + want.ToString("X")); }
                 Native.SetLong(overlayH, Native.GWL_EXSTYLE, want);
+                if (Hosted && (ex & Native.WS_EX_LAYERED) == 0) ApplyAlpha(true); // 分层样式被拿掉又补上后，透明度要重新告诉系统，不然整个窗口看不见
             }
         }
 
         void SetAlpha(double a)
         {
             alpha = Math.Max(0, Math.Min(1, a));
-            grid.Opacity = alpha;
+            ApplyAlpha();
+            if (fx != null) fx.Mix = MixFor();
+        }
+
+        int appliedAlpha = -1; // -1 = 还没设过
+        void ApplyAlpha() { ApplyAlpha(false); }
+        void ApplyAlpha(bool always)
+        {
+            if (PerPixel) { grid.Opacity = alpha; return; }
+            if (!Hosted || overlayH == IntPtr.Zero) return;   // opaque 模式只测性能，不做透明
+            int b = (int)Math.Round((waitFrame ? 0 : alpha) * 255);
+            if (b == appliedAlpha && !always) return;
+            appliedAlpha = b;
+            Native.SetLayeredWindowAttributes(overlayH, 0, (byte)b, Native.LWA_ALPHA);
         }
 
         void RampAlpha(double to, double seconds, Action then)
@@ -1440,12 +1811,6 @@ namespace AIBootAnimations
         {
             if (intro == null) return;
             volFrom = intro.Volume; volTo = to; volT0 = DateTime.Now; volDur = seconds;
-        }
-
-        void SetClickThrough(IntPtr h)
-        {
-            if (h == IntPtr.Zero) return;
-            Native.SetLong(h, Native.GWL_EXSTYLE, Native.GetLong(h, Native.GWL_EXSTYLE) | Native.WS_EX_TRANSPARENT);
         }
 
         // 字幕：按播放时间算透明度，入场、出场各渐变 SubtitleFadeSeconds
@@ -1460,7 +1825,6 @@ namespace AIBootAnimations
             {
                 if (currentSub >= 0 && sub.Opacity > 0) L("字幕 " + (currentSub + 1) + " 消失，视频时间 " + t.ToString("0.000"));
                 sub.Opacity = 0; currentSub = idx >= 0 ? idx : currentSub;
-                if (currentSub == config.Subtitles.Count - 1 && phase != Phase.Intro) CloseTop(); // 最后一句放完，字幕层收掉
                 return;
             }
             var s = config.Subtitles[idx];
@@ -1475,22 +1839,20 @@ namespace AIBootAnimations
             sub = null;
         }
 
-        /// 进入循环帧：透出应用界面，点击穿透
+        /// 进入循环帧：透出目标应用界面，点击穿透
         void Reveal(bool quick)
         {
             if (phase != Phase.Intro) return;
             phase = Phase.Revealed;
             clickThrough = true; EnsureOverlayStyle(true);
-            SetClickThrough(topH);
             grid.Background = Brushes.Transparent;
-            if (skipBtn != null) skipBtn.Visibility = Visibility.Collapsed; // 进入循环背景后不再显示「跳过」
             if (!config.LoopBackground)
             {
                 L("进入循环帧，循环背景已关，淡出");
                 Finish(false); return;
             }
             L("进入循环帧，透出界面");
-            UpdateEffect();   // 此刻整窗还是不透明，Mix = 0，画面不会跳；随着淡出过渡到对比度适配
+            UpdateEffect();
             RampAlpha(config.ResidualAlpha, quick ? 0.9 : config.FadeDurationSeconds, null);
         }
 
@@ -1509,9 +1871,6 @@ namespace AIBootAnimations
             intro.BeginAnimation(UIElement.OpacityProperty, fade);
             RampVolume(0, 0.9); // 开屏音效随画面一起淡出
             Reveal(true);
-            var closeTop = new DispatcherTimer { Interval = TimeSpan.FromSeconds(0.5) };
-            closeTop.Tick += delegate { closeTop.Stop(); CloseTop(); };
-            closeTop.Start();
         }
 
         /// 菜单、设置窗口里拖滑块时实时生效
@@ -1519,6 +1878,14 @@ namespace AIBootAnimations
         {
             config = c;
             if (phase == Phase.Ending || phase == Phase.Done) return;
+            if (surfaceMode != SurfaceMode())
+            {
+                CloseSurface();
+                CreateSurface();
+                Follow(true);
+                if (phase == Phase.Done) return;
+                L("切换浮层模式 " + surfaceMode);
+            }
             if (phase == Phase.Revealed && alphaDur < 0) SetAlpha(c.ResidualAlpha);
             if (intro != null && !introGone) { volDur = -1; intro.Volume = c.IntroVolume; }
             UpdateEffect();
@@ -1528,7 +1895,7 @@ namespace AIBootAnimations
         void UpdateEffect()
         {
             if (phase != Phase.Revealed) return;
-            bool want = config.ContrastOn && ContrastEffect.Shader != null;
+            bool want = PerPixel && config.ContrastOn && ContrastEffect.Shader != null;
             if (!want)
             {
                 if (fx != null) { grid.Effect = null; fx = null; L("循环背景：原样半透明"); }
@@ -1557,10 +1924,10 @@ namespace AIBootAnimations
         {
             if (phase == Phase.Ending || phase == Phase.Done) return;
             phase = Phase.Ending;
+            waitFrame = false;
             clickThrough = true; EnsureOverlayStyle(true);
             double d = fast ? 0.4 : 1.2;
             L(fast ? "关闭（跳过）" : "淡出");
-            if (skipBtn != null) skipBtn.Visibility = Visibility.Collapsed;
             HideSubtitles();
             RampVolume(0, d);
             RampAlpha(0, d, Teardown);
@@ -1571,19 +1938,48 @@ namespace AIBootAnimations
             if (phase == Phase.Done) return;
             phase = Phase.Done;
             if (tick != null) tick.Stop();
+            foreach (var hk in hooks) { try { Native.UnhookWinEvent(hk); } catch { } }
+            hooks.Clear();
             try { SystemEvents.SessionSwitch -= onSession; SystemEvents.DisplaySettingsChanged -= onDisplay; } catch { }
-            if (powerNotify != IntPtr.Zero) { try { Native.UnregisterPowerSettingNotification(powerNotify); } catch { } powerNotify = IntPtr.Zero; }
+            DropCandidate();
             foreach (var m in new[] { intro, loopA, loopB, retiring })
                 if (m != null) { try { m.Stop(); m.Close(); } catch { } }
-            CloseTop();
-            try { overlay.Close(); } catch { }
+            try { CloseSurface(); }
+            catch (Exception ex) { L("关浮层出错：" + ex.Message); }
             L("播放结束");
             if (onDone != null) onDone();
         }
 
         public bool Active { get { return phase != Phase.Done; } }
+        /// 正在放开屏或循环背景（不算正在淡出关掉）
+        public bool Playing { get { return phase == Phase.Intro || phase == Phase.Revealed; } }
+        public bool InIntro { get { return phase == Phase.Intro; } }
+        public bool CanPause { get { return phase == Phase.Revealed && introGone && !waitFrame; } }
 
-        /// 测试用：把目标窗口那块屏幕截下来
+        // ── 暂停循环背景：画面停在当前这一帧，背景照样盖着；再点继续 ──
+        bool paused;
+        public bool Paused { get { return paused; } }
+        public void SetPaused(bool p)
+        {
+            if (!CanPause || p == paused) return;
+            if (p)
+            {
+                if (swapFrom != null) FinishSwap();   // 正在接缝：先接完
+                if (handTo != null) { handTo.Pause(); handTo.Position = TimeSpan.Zero; handFrom = null; handTo = null; } // 正在重叠交接：新的退回待命
+                foreach (var m in new[] { intro, loopA, loopB, retiring })
+                    if (m != null) { try { m.Pause(); } catch { } }
+                paused = true;
+            }
+            else
+            {
+                paused = false;
+                if (activeLoop != null) activeLoop.Play();
+                lastMoveMs = clock.ElapsedMilliseconds; lastPos = -1; // 卡住检测从现在重新算
+            }
+            L(p ? "暂停循环背景" : "继续播放循环背景");
+        }
+
+        /// 测试用：把目标应用窗口那块屏幕截下来
         public void Snapshot(string path)
         {
             Native.RECT r = lastRect;
@@ -1602,11 +1998,10 @@ namespace AIBootAnimations
             // 点击穿透检查：窗口中心这一点，鼠标点下去会落到哪个窗口
             IntPtr hit = Native.WindowFromPoint(new Native.POINT { X = r.Left + w / 2, Y = r.Top + h / 2 });
             IntPtr root = Native.GetAncestor(hit, 2 /*GA_ROOT*/);
-            string who = root == overlayH ? "浮层" : root == Target.Hwnd ? "目标窗口" : root == topH ? "字幕层" : ("其他 " + Native.ClassOf(root));
-            L("截图 " + path + "  播放阶段=" + phase + " 透明度=" + alpha.ToString("0.00") + " 样式=0x" + Native.GetLong(overlayH, Native.GWL_EXSTYLE).ToString("X") + " 中心点击落到=" + who);
+            string who = root == overlayH ? "浮层" : root == Target.Hwnd ? "目标窗口" : ("其他 " + Native.ClassOf(root));
+            L("截图 " + path + "  播放阶段=" + phase + " 透明度=" + alpha.ToString("0.00") + " 样式=0x" + Native.GetLong(overlayH, Native.GWL_EXSTYLE).ToString("X") + " 中心点击落到=" + who + " hit=" + (root == Target.Hwnd ? "target" : root == overlayH ? "overlay" : "other"));
         }
     }
-
 
     // ───────────────────────── 背景适配：去背景 + 调色（只用于循环背景）─────────────────────────
 
@@ -1663,66 +2058,6 @@ namespace AIBootAnimations
 
     // ───────────────────────── 托盘右键菜单 ─────────────────────────
 
-    /// 托盘图标右键的小菜单：界面在 src\TrayMenu.xaml（白底圆角、阴影，和「启动设置」一个风格），只有「启动设置」和「退出」。
-    /// 出现在鼠标位置，往上展开；点别处或按 Esc 就收起
-    public class TrayMenu : Window
-    {
-        readonly FrameworkElement view;
-        Native.POINT anchor;
-
-        public TrayMenu(App app)
-        {
-            WindowStyle = WindowStyle.None; AllowsTransparency = true; Background = Brushes.Transparent;
-            ShowInTaskbar = false; Topmost = true; ResizeMode = ResizeMode.NoResize;
-            SizeToContent = SizeToContent.WidthAndHeight; UseLayoutRounding = true;
-            Opacity = 0;   // 摆好位置再显示，不闪
-            using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("TrayMenu.xaml"))
-                view = (FrameworkElement)XamlReader.Load(st);
-            Content = view;
-            var icon = (Image)view.FindName("OpenIcon");
-            icon.Source = Icons.ToImageSource(Icons.Render(Icons.Logo, 64));
-            RenderOptions.SetBitmapScalingMode(icon, BitmapScalingMode.HighQuality);
-            ((Button)view.FindName("OpenItem")).Click += delegate { Close(); app.OpenSettings(); };
-            ((Button)view.FindName("QuitItem")).Click += delegate { Close(); app.Quit(); };
-            Deactivated += delegate { Dispatcher.BeginInvoke(new Action(delegate { if (IsLoaded) Close(); })); };
-            PreviewKeyDown += delegate (object s, KeyEventArgs e) { if (e.Key == Key.Escape) Close(); };
-            SizeChanged += delegate { if (IsVisible) Place(); };   // 换到缩放不同的屏幕时 WPF 会改大小，重新对位
-        }
-
-        public void ShowAtCursor()
-        {
-            Native.GetCursorPos(out anchor);
-            double scale = Native.ScaleAt(anchor);
-            Left = anchor.X / scale; Top = anchor.Y / scale;   // 先放到鼠标所在的屏幕上，下面再按真实像素对准
-            Show();
-            Place();
-            var h = new WindowInteropHelper(this).Handle;
-            Native.SetForegroundWindow(h);
-            Activate();
-            Opacity = 1;
-        }
-
-        /// 菜单左下角对准鼠标（扣掉外圈留给阴影的 12 像素），往上展开；碰到屏幕边就往里收
-        void Place()
-        {
-            var h = new WindowInteropHelper(this).Handle;
-            if (h == IntPtr.Zero) return;
-            Native.RECT r;
-            if (!Native.GetWindowRect(h, out r)) return;
-            int w = r.Right - r.Left, ht = r.Bottom - r.Top;
-            int pad = (int)Math.Round(12 * Native.ScaleAt(anchor));
-            var work = Native.WorkAreaAt(anchor);
-            int x = anchor.X - pad, y = anchor.Y - ht + pad;
-            x = Math.Max(work.Left, Math.Min(x, work.Right - w));
-            y = Math.Max(work.Top, Math.Min(y, work.Bottom - ht));
-            if (x != r.Left || y != r.Top)
-                Native.SetWindowPos(h, IntPtr.Zero, x, y, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
-        }
-    }
-
-    // ───────────────────────── 启动设置窗口 ─────────────────────────
-
-    /// 「启动设置」：界面在 src\SettingsView.xaml（作为资源嵌在程序里），这里只负责接线
     public class SettingsWindow : Window
     {
         readonly App app;
@@ -1780,11 +2115,11 @@ namespace AIBootAnimations
         void Wire()
         {
             var header = Find<Image>("HeaderIcon");
-            header.Source = Icons.ToImageSource(Icons.Render(Icons.Combined, 96));
+            header.Source = Icons.ToImageSource(Icons.Render(Icons.Claude, 96));
             RenderOptions.SetBitmapScalingMode(header, BitmapScalingMode.HighQuality);
             Find<Button>("CloseButton").Click += delegate { Close(); };
 
-            // 三个应用放在一起：勾选框 + 图标 + 名字，右边「预览」
+            // 四个应用放在一起：勾选框 + 图标 + 名字，右边「预览」
             var list = Find<StackPanel>("AppsPanel");
             var line = new SolidColorBrush(Color.FromRgb(0xEE, 0xF0, 0xF3));
             var previewStyle = (Style)View.FindResource("Preview");
@@ -1964,7 +2299,7 @@ namespace AIBootAnimations
         public readonly List<Profile> Profiles = Profile.All();
         public Settings Settings;
         WF.NotifyIcon tray;
-        TrayMenu trayMenu;
+        WF.ContextMenuStrip trayMenu;
         SettingsWindow win;
         DispatcherTimer watch;
         readonly string[] args;
@@ -2004,22 +2339,34 @@ namespace AIBootAnimations
             }
             LoadFont();
             Finder.TestTitle = Arg("--target-title");
-            testMode = Finder.TestTitle != null;
+            testMode = Finder.TestTitle != null || Has("--bench");
             testProfile = FindProfile(Arg("--profile")) ?? Profiles[0];
             Dev.LoopCutSec = ArgD("--loop-cut", Dev.LoopCutSec);
             Dev.StallTestSec = ArgD("--stall-test", Dev.StallTestSec);
             Dev.RecycleEvery = (int)ArgD("--recycle-every", Dev.RecycleEvery);
             Dev.HeartbeatSec = ArgD("--heartbeat", Dev.HeartbeatSec);
+            Dev.StandbyFailEvery = (int)ArgD("--standby-fail-test", Dev.StandbyFailEvery);
+            Dev.PerfSec = ArgD("--perf-log", Dev.PerfSec);
+            string mode = Arg("--overlay-mode");
+            if (mode == "hosted" || mode == "perpixel" || mode == "opaque") Dev.OverlayMode = mode;
+            if (Dev.PerfSec > 0)
+            {
+                var samples = new Perf();
+                samples.Sample();
+                var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Dev.PerfSec) };
+                timer.Tick += delegate { Log.W("性能：" + samples.Sample()); };
+                timer.Start();
+            }
             bool noScale;
             AppContext.TryGetSwitch("Switch.System.Windows.DoNotScaleForDpiChanges", out noScale);
-            Log.W("启动 " + string.Join(" ", args) + "  程序目录 " + BaseDir + "  DPI 模式：" + Native.DpiModeName() + "  WPF 按屏幕缩放：" + (noScale ? "关" : "开"));
+            Log.W("启动 " + string.Join(" ", args) + "  程序目录 " + BaseDir + "  DPI 模式：" + Native.DpiModeName() + "  WPF 按屏幕缩放：" + (noScale ? "关" : "开")
+                + "  显卡渲染等级 " + (RenderCapability.Tier >> 16) + "  浮层 " + Dev.OverlayMode);
 
             if (Arg("--render-subtitle") != null) { RenderSubtitleTest(); return; }
             if (Arg("--render-icons") != null) { RenderIcons(Arg("--render-icons")); return; }
             if (Arg("--render-settings") != null) { RenderSettings(Arg("--render-settings")); return; }
             if (Arg("--render-contrast") != null) { RenderContrast(); return; }
             if (Arg("--render-ico") != null) { RenderIco(Arg("--render-ico")); return; }
-            if (Arg("--render-traymenu") != null) { RenderElement(new TrayMenu(this), Arg("--render-traymenu")); return; }
 
             SetupTray();
             if (Has("--settings")) OpenSettings();
@@ -2028,22 +2375,29 @@ namespace AIBootAnimations
             // 不能只看「看得见的窗口」——应用当时要是最小化或缩在托盘里，窗口找不到，之后一还原就会被当成新启动、
             // 又播一遍开机动画。所以把这几个应用现有的所有进程都记下来，只有真正新开的进程才播
             if (!testMode)
+            {
+                foreach (var proc in Process.GetProcesses())
+                    using (proc)
+                    {
+                        try
+                        {
+                            string name = proc.ProcessName;
+                            foreach (var p in Profiles)
+                                if (p.MatchesProcess(name)) p.SeenPids.Add((uint)proc.Id);
+                        }
+                        catch (InvalidOperationException) { } // 枚举后进程已经退出
+                        catch (System.ComponentModel.Win32Exception) { } // 受保护的系统进程
+                    }
                 foreach (var p in Profiles)
                 {
-                    foreach (var name in p.ProcessNames)
-                        foreach (var proc in Process.GetProcessesByName(name))
-                        {
-                            p.SeenPids.Add((uint)proc.Id);
-                            proc.Dispose();
-                        }
                     var t0 = Finder.Find(p);
                     if (t0.Valid) p.SeenPids.Add(t0.Pid);
-                    if (p.SeenPids.Count > 0) Log.W(p.AppName + " 已经在运行（" + p.SeenPids.Count + " 个进程），不补播；之后最小化、还原也不会重播");
+                    if (p.SeenPids.Count > 0) Log.W(p.AppName + " 已经在运行，不补播");
                 }
-
-            watch = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
-            watch.Tick += delegate { Watch(); };
-            watch.Start();
+                watch = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+                watch.Tick += delegate { Watch(); };
+                watch.Start();
+            }
 
             if (testMode) RunTest();
             else
@@ -2067,7 +2421,7 @@ namespace AIBootAnimations
 
         void ReloadSettings() { Settings = Settings.Load(Profiles); }
 
-        // 每 0.4 秒看一眼：三个应用有没有新开（新的进程号 = 新启动）
+        // 每 0.4 秒看一眼：四个应用有没有新开（新的进程号 = 新启动）
         void Watch()
         {
             foreach (var p in Profiles)
@@ -2075,12 +2429,12 @@ namespace AIBootAnimations
                 var t = Finder.Find(p);
                 if (!t.Valid || p.SeenPids.Contains(t.Pid)) continue;
                 p.SeenPids.Add(t.Pid);
-                if (testMode) continue;
                 ReloadSettings();
                 bool on = Settings.Of(p).Enabled;
-                Log.W("检测到 " + p.AppName + " 启动 pid=" + t.Pid + "，启用=" + on + " 开屏=" + Settings.PlayIntro + " 循环背景=" + Settings.LoopBackground);
-                if (!on || (!Settings.PlayIntro && !Settings.LoopBackground)) continue;
-                Start(p, t, Settings.PlayIntro);
+                var cfg = Settings.ConfigFor(p);
+                Log.W("检测到 " + p.AppName + " 启动 pid=" + t.Pid + "，启用=" + on + " 开屏=" + cfg.PlayIntro + " 循环背景=" + cfg.LoopBackground);
+                if (!on || (!cfg.PlayIntro && !cfg.LoopBackground)) continue;
+                Start(p, t, cfg.PlayIntro);
             }
         }
 
@@ -2089,7 +2443,7 @@ namespace AIBootAnimations
             if (p.Current != null) p.Current.Teardown();
             Show s = null;
             s = new Show(p, t, Settings.ConfigFor(p), withIntro, delegate { if (p.Current == s) p.Current = null; });
-            p.Current = s;
+            p.Current = s.Active ? s : null;
         }
 
         bool StartOnCurrent(Profile p, bool withIntro)
@@ -2097,7 +2451,7 @@ namespace AIBootAnimations
             var t = Finder.Find(p);
             if (!t.Valid)
             {
-                if (tray != null) tray.ShowBalloonTip(3000, "启动设置", "没找到 " + p.AppName + " 窗口，先把 " + p.AppName + " 打开吧。", WF.ToolTipIcon.Info);
+                if (!testMode && tray != null) tray.ShowBalloonTip(3000, "启动设置", "没找到 " + p.AppName + " 窗口，先把 " + p.AppName + " 打开吧。", WF.ToolTipIcon.Info);
                 return false;
             }
             p.SeenPids.Add(t.Pid);
@@ -2119,7 +2473,16 @@ namespace AIBootAnimations
         /// 改设置：存盘、马上作用到正在播放的动画、刷新设置窗口（from 是发起修改的那个，不用刷它自己）
         public void Change(Action<Settings> change, object from)
         {
+            bool pi = Settings.PlayIntro, lb = Settings.LoopBackground;
+            double ra = Settings.ResidualAlpha, iv = Settings.IntroVolume;
             change(Settings);
+            foreach (var a in Settings.Apps.Values)
+            {
+                if (Settings.PlayIntro != pi) a.PlayIntro = null;
+                if (Settings.LoopBackground != lb) a.LoopBackground = null;
+                if (Settings.ResidualAlpha != ra) a.ResidualAlpha = null;
+                if (Settings.IntroVolume != iv) a.IntroVolume = null;
+            }
             Settings.Save();
             ApplyToShows();
             if (win != null && from != win) win.Refresh();
@@ -2170,7 +2533,7 @@ namespace AIBootAnimations
         public void Uninstall()
         {
             var r = MessageBox.Show(
-                "会停掉三个开机动画，删除开机自启、设置和日志。Claude、ChatGPT、Antigravity 本身都没被改过，卸载后就是原装的样子。\n\n" +
+                "会停掉四个开机动画，删除开机自启、设置和日志。Claude、ChatGPT、Antigravity、DeepSeek Harness 本身都没被改过，卸载后就是原装的样子。\n\n" +
                 "项目文件夹里的程序、源码和动画素材会保留（" + BaseDir.TrimEnd('\\') + "），不需要的话可以手动删掉。",
                 "卸载开机动画？", MessageBoxButton.OKCancel, MessageBoxImage.Question);
             if (r != MessageBoxResult.OK) return;
@@ -2191,30 +2554,101 @@ namespace AIBootAnimations
             exiting = true;
             foreach (var p in Profiles) if (p.Current != null) p.Current.Teardown();
             if (win != null) { try { win.Close(); } catch { } }
-            if (trayMenu != null) { try { trayMenu.Close(); } catch { } }
+            if (trayMenu != null) { try { trayMenu.Dispose(); } catch { } }
             if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
             Log.W("退出");
             Shutdown();
         }
 
-        // ── 托盘：一个图标。左键打开「启动设置」，右键是一个简洁的小菜单（启动设置 / 退出）──
+        // ── 托盘：一个图标。左键打开「启动设置」，右键是一个小菜单（启动设置、各场暂停/继续、退出）──
         void SetupTray()
         {
-            tray = new WF.NotifyIcon { Icon = SD.Icon.FromHandle(Icons.Render(Icons.Combined, 32).GetHicon()), Text = "开机动画 · Claude / ChatGPT / Antigravity", Visible = true };
+            tray = new WF.NotifyIcon { Icon = SD.Icon.FromHandle(Icons.Render(Icons.Claude, 32).GetHicon()), Text = "开机动画 · Claude / ChatGPT / Antigravity / DeepSeek Harness", Visible = true };
             tray.MouseUp += delegate (object s, WF.MouseEventArgs ev)
             {
                 if (ev.Button == WF.MouseButtons.Left) OpenSettings();
-                else if (ev.Button == WF.MouseButtons.Right) ShowTrayMenu();
             };
+            // 右键菜单常挂在托盘图标上（系统负责弹出和摆位置），每次打开前按当前状态重新生成
+            trayMenu = new WF.ContextMenuStrip();
+            trayMenu.Opening += delegate { BuildTrayMenu(); };
+            tray.ContextMenuStrip = trayMenu;
         }
 
-        void ShowTrayMenu()
+        /// 右键两级菜单：一级先选应用（开着的后面带 ●），二级是原来单独版的那一整套
+        void BuildTrayMenu()
         {
-            if (trayMenu != null) trayMenu.Close();
-            trayMenu = new TrayMenu(this);
-            var m = trayMenu;
-            m.Closed += delegate { if (trayMenu == m) trayMenu = null; };
-            m.ShowAtCursor();
+            ReloadSettings();
+            var old = new List<WF.ToolStripItem>();
+            foreach (WF.ToolStripItem i in trayMenu.Items) old.Add(i);
+            trayMenu.Items.Clear();
+            foreach (var i in old) i.Dispose();
+            foreach (var p in Profiles) trayMenu.Items.Add(AppMenu(p));
+            trayMenu.Items.Add(new WF.ToolStripSeparator());
+            trayMenu.Items.Add("启动设置…", null, delegate { OpenSettings(); });
+            trayMenu.Items.Add("打开设置文件夹…", null, delegate { OpenConfigFolder(); });
+            trayMenu.Items.Add("卸载开机动画…", null, delegate { Uninstall(); });
+            trayMenu.Items.Add("退出", null, delegate { Quit(); });
+        }
+
+        static string ShortName(Profile p) { return p.Title.Replace(" 开机动画", ""); }
+
+        WF.ToolStripMenuItem AppMenu(Profile p)
+        {
+            var a = Settings.Of(p);
+            var cfg = Settings.ConfigFor(p);
+            bool running = p.Current != null || Finder.Find(p).Valid;
+            var top = new WF.ToolStripMenuItem(ShortName(p) + (running ? "  ●" : ""));
+            var d = top.DropDownItems;
+            d.Add(new WF.ToolStripLabel("打开 " + p.AppName + " 时") { Enabled = false });
+            var intro = new WF.ToolStripMenuItem("播放开屏动画") { Checked = a.Enabled && cfg.PlayIntro };
+            intro.Click += delegate { bool v = !intro.Checked; ChangeApp(p, delegate (AppSettings x) { x.PlayIntro = v; if (v) x.Enabled = true; }); };
+            var loop = new WF.ToolStripMenuItem("保留循环背景") { Checked = a.Enabled && cfg.LoopBackground };
+            loop.Click += delegate { bool v = !loop.Checked; ChangeApp(p, delegate (AppSettings x) { x.LoopBackground = v; if (v) x.Enabled = true; }); };
+            d.Add(intro); d.Add(loop);
+            d.Add(new WF.ToolStripSeparator());
+            var alphaLabel = new WF.ToolStripLabel();
+            var alphaBar = MakeBar(80, (int)Math.Round(cfg.ResidualAlpha * 100));
+            alphaLabel.Text = "背景不透明度  " + alphaBar.Value + "%";
+            alphaBar.ValueChanged += delegate
+            {
+                alphaLabel.Text = "背景不透明度  " + alphaBar.Value + "%";
+                double v = alphaBar.Value / 100.0;
+                ChangeApp(p, delegate (AppSettings x) { x.ResidualAlpha = v; });
+            };
+            var volLabel = new WF.ToolStripLabel();
+            var volBar = MakeBar(100, (int)Math.Round(cfg.IntroVolume * 100));
+            volLabel.Text = "开屏音量  " + volBar.Value + "%";
+            volBar.ValueChanged += delegate
+            {
+                volLabel.Text = "开屏音量  " + volBar.Value + "%";
+                double v = volBar.Value / 100.0;
+                ChangeApp(p, delegate (AppSettings x) { x.IntroVolume = v; });
+            };
+            d.Add(alphaLabel); d.Add(new WF.ToolStripControlHost(alphaBar));
+            d.Add(volLabel); d.Add(new WF.ToolStripControlHost(volBar));
+            d.Add(new WF.ToolStripSeparator());
+            d.Add(new WF.ToolStripLabel("现在，在 " + p.AppName + " 窗口上") { Enabled = false });
+            d.Add("播放一次开屏动画", null, delegate { PreviewIntro(p); });
+            var show = p.Current;
+            d.Add(show == null ? "开启循环背景" : "关掉动画 / 循环背景", null, delegate { if (p.Current != null) StopShow(p); else PreviewLoop(p); });
+            var pause = new WF.ToolStripMenuItem(show != null && show.Paused ? "继续播放循环背景" : "暂停循环背景") { Enabled = show != null && show.CanPause };
+            pause.Click += delegate { if (p.Current == show && show != null && show.CanPause) show.SetPaused(!show.Paused); };
+            d.Add(pause);
+            return top;
+        }
+
+        static WF.TrackBar MakeBar(int max, int value)
+        {
+            return new WF.TrackBar { Minimum = 0, Maximum = max, Value = Math.Max(0, Math.Min(max, value)), TickStyle = WF.TickStyle.None, Width = 200, AutoSize = false, Height = 28, SmallChange = 1, LargeChange = 5 };
+        }
+
+        /// 托盘二级菜单改某个应用自己的设置：存盘、作用到它正在放的那一场、刷新设置窗口
+        void ChangeApp(Profile p, Action<AppSettings> change)
+        {
+            change(Settings.Of(p));
+            Settings.Save();
+            ApplyToShows();
+            if (win != null) win.Refresh();
         }
 
         /// Windows 11 默认把新托盘图标收进「^」里。第一次运行时把自己的图标设为常显（用户以后手动藏起来就不再动它）
@@ -2241,7 +2675,7 @@ namespace AIBootAnimations
             catch (Exception ex) { Log.W("托盘图标常显设置失败：" + ex.Message); }
         }
 
-        // ── 测试：--target-title 窗口标题 [--profile claude|gpt|antigravity]，用指定应用的素材盖在那个窗口上 ──
+        // ── 测试：--target-title 窗口标题 [--profile claude|gpt|antigravity|deepseek]，用指定应用的素材盖在那个窗口上 ──
         void RunTest()
         {
             var p = testProfile;
@@ -2344,13 +2778,13 @@ namespace AIBootAnimations
             Shutdown();
         }
 
-        /// 开发用：把托盘图标和三个小图标存成 PNG（--render-icons 目录）
+        /// 开发用：把托盘图标和四个小图标存成 PNG（--render-icons 目录）
         void RenderIcons(string dir)
         {
             try
             {
                 Directory.CreateDirectory(dir);
-                using (var b = Icons.Render(Icons.Combined, 32)) b.Save(Path.Combine(dir, "tray.png"), SD.Imaging.ImageFormat.Png);
+                using (var b = Icons.Render(Icons.Claude, 32)) b.Save(Path.Combine(dir, "tray.png"), SD.Imaging.ImageFormat.Png);
                 using (var b = Icons.Render(Icons.Logo, 256)) b.Save(Path.Combine(dir, "logo-256.png"), SD.Imaging.ImageFormat.Png);
                 using (var b = Icons.Render(Icons.Logo, 32)) b.Save(Path.Combine(dir, "logo-32.png"), SD.Imaging.ImageFormat.Png);
                 using (var b = Icons.Render(Icons.Logo, 16)) b.Save(Path.Combine(dir, "logo-16.png"), SD.Imaging.ImageFormat.Png);
@@ -2369,7 +2803,9 @@ namespace AIBootAnimations
             {
                 int i = Array.IndexOf(args, "--render-contrast");
                 string framePath = args[i + 1], outPath = args[i + 2];
-                double alpha = args.Length > i + 3 ? double.Parse(args[i + 3], CultureInfo.InvariantCulture) : Settings.ResidualAlpha;
+                double alpha = Settings.ResidualAlpha;
+                if (args.Length > i + 3 && !args[i + 3].StartsWith("--", StringComparison.Ordinal))
+                    alpha = double.Parse(args[i + 3], CultureInfo.InvariantCulture);
                 var frame = new BitmapImage();
                 frame.BeginInit(); frame.CacheOption = BitmapCacheOption.OnLoad; frame.UriSource = new Uri(Path.GetFullPath(framePath)); frame.EndInit();
                 const int W = 640, H = 360, gap = 12;
@@ -2442,11 +2878,17 @@ namespace AIBootAnimations
         public static int Main(string[] args)
         {
             Native.EnablePerMonitorDpi();   // 清单里已声明 PerMonitorV2，这里是保险
+            return Run(args);
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static int Run(string[] args)
+        {
             GpuPref.Ensure();               // 要在 WPF 建立显卡渲染之前设好
             bool test = Array.IndexOf(args, "--target-title") >= 0 || Array.IndexOf(args, "--render-subtitle") >= 0
                 || Array.IndexOf(args, "--render-icons") >= 0 || Array.IndexOf(args, "--render-settings") >= 0
                 || Array.IndexOf(args, "--render-contrast") >= 0 || Array.IndexOf(args, "--render-ico") >= 0
-                || Array.IndexOf(args, "--render-traymenu") >= 0;
+                || Array.IndexOf(args, "--render-traymenu") >= 0 || Array.IndexOf(args, "--bench") >= 0;
             Mutex mutex = null;
             EventWaitHandle showEvent = null;
             if (!test)

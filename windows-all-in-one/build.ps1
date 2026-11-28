@@ -55,10 +55,9 @@ $refs = @("$wpf\PresentationFramework.dll", "$wpf\PresentationCore.dll", "$wpf\W
           "$fw\System.Xaml.dll", "$fw\System.Windows.Forms.dll", "$fw\System.Drawing.dll",
           "$fw\System.Web.Extensions.dll", "$fw\System.Core.dll", "$fw\System.Management.dll") | ForEach-Object { "/r:$_" }
 $exe = Join-Path $Out 'AIBootAnimations.exe'
-$cscArgs = @('/nologo', '/target:winexe', '/optimize+', '/codepage:65001', '/platform:anycpu', "/out:$exe",
+$cscArgs = @('/nologo', '/langversion:5', '/target:winexe', '/optimize+', '/codepage:65001', '/platform:anycpu', "/out:$exe",
              "/win32manifest:$src\app.manifest",
              "/resource:$src\SettingsView.xaml,SettingsView.xaml",
-             "/resource:$src\TrayMenu.xaml,TrayMenu.xaml",
              "/resource:$ps,ContrastBackground.ps")
 # 程序图标（exe 在资源管理器里显示的图标）。重新生成：AIBootAnimations.exe --render-ico src\app.ico
 if (Test-Path "$src\app.ico") { $cscArgs += "/win32icon:$src\app.ico" }
@@ -68,6 +67,17 @@ if ($LASTEXITCODE -ne 0) { throw "编译失败" }
 
 # ── 3. 运行配置 ──
 Copy-Item "$src\app.config" (Join-Path $Out 'AIBootAnimations.exe.config') -Force
+
+# 与安装共用 Release 素材清单。已备齐的工作副本可以直接离线构建；
+# 只有缺少播放必需的视频时才调用仅取素材的入口，loop-x2 是可选优化。
+$profiles = @('claude', 'gpt', 'antigravity', 'deepseek')
+$missing = foreach ($profileKey in $profiles) {
+  foreach ($file in @('intro.mp4', 'loop.mp4')) {
+    $asset = Join-Path $PSScriptRoot "assets\$profileKey\$file"
+    if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) { $asset }
+  }
+}
+if ($missing) { & "$PSScriptRoot\install.ps1" -OnlyAssets }
 
 # 输出到别的目录时，把素材和卸载脚本也带过去
 if ((Resolve-Path $Out).Path.TrimEnd('\') -ne (Resolve-Path $PSScriptRoot).Path.TrimEnd('\')) {
