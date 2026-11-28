@@ -504,7 +504,7 @@ final class Show {
             if overlay.isVisible { overlay.orderOut(nil) }
             sysAnim = true; stableSince = Date()   // 再出现时多半是从 Dock 还原的动画，等停稳再露面
             if NSRunningApplication(processIdentifier: pid) == nil { finish(fast: true) }
-            return 1
+            return 0.1   // 最小化期间查窗口列表很便宜，0.1 秒一查，还原时背景能马上回来
         }
         let now = ProcessInfo.processInfo.systemUptime
         let frameChanged = t.cocoaFrame != lastFrame
